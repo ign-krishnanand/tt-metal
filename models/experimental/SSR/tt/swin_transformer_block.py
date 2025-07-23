@@ -21,7 +21,6 @@ class TTSwinTransformerBlock(LightweightModule):
         shift_size=0,
         mlp_ratio=4.0,
         memory_config=None,
-        ref_layer=None,
     ):
         super().__init__()
         self.parameters = parameters
