@@ -40,7 +40,7 @@ class TTPatchEmbed(LightweightModule):
         self.embed_dim = embed_dim  
         self.device = device  
         self.dtype = dtype
-        self.memory_config = memory_config if memory_config is not None else ttnn.DRAM_MEMORY_CONFIG  
+        self.memory_config = ttnn.DRAM_MEMORY_CONFIG  
           
         # Store projection parameters (weight and bias)  
         self.proj_weight = parameters["proj"]["weight"]
