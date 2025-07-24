@@ -1,4 +1,4 @@
-from model.net_blocks import BasicLayer, PatchEmbed, Mlp, PatchMerging
+from models.experimental.SSR.reference.SSR.model.net_blocks import BasicLayer, PatchEmbed, Mlp, PatchMerging
 
 import torch, math
 import torch.nn as nn
@@ -10,6 +10,7 @@ class mask_token_inference(nn.Module):
     def __init__(self, dim, num_heads=1, qkv_bias=False, qk_scale=None, attn_drop=0.0, proj_drop=0.0):
         super().__init__()
 
+        # self.norm = nn.LayerNorm(dim, dtype=torch.bfloat16)
         self.norm = nn.LayerNorm(dim)
         self.num_heads = num_heads
         head_dim = dim // num_heads
