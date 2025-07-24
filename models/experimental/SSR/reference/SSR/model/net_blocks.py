@@ -482,6 +482,9 @@ class BasicLayer(nn.Module):
         self.depth = depth
         self.use_checkpoint = use_checkpoint
 
+        # Setting for convenient params extraction in test
+        self.window_size = window_size
+
         # build blocks
         self.blocks = nn.ModuleList(
             [

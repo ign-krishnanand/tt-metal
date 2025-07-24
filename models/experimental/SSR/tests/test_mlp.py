@@ -71,4 +71,6 @@ def test_mlp(image_size, patch_size, token_size, input_shape):
     else:
         logger.warning("SwinLayer Failed!")
 
+    ttnn.close_device(device)
+
     assert does_pass
