@@ -26,10 +26,10 @@ class TTMaskTokenInference(LightweightModule):
         self.v_weight = parameters["v"]["weight"]  # ttnn tensor for value projection
         self.proj_weight = parameters["proj"]["weight"]  # ttnn tensor for output projection
 
-        # Biases (if qkv_bias=True)
-        self.q_bias = parameters["q"]["bias"]
-        self.k_bias = parameters["k"]["bias"]
-        self.v_bias = parameters["v"]["bias"]
+        
+        self.q_bias = parameters["q"]["bias"] if qkv_bias else None
+        self.k_bias = parameters["k"]["bias"] if qkv_bias else None
+        self.v_bias = parameters["v"]["bias"] if qkv_bias else None
         self.proj_bias = parameters["proj"]["bias"]
 
         # Scale tensor
