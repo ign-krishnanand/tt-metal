@@ -1,41 +1,39 @@
-import math  
-import pytest  
-import torch  
-import ttnn  
-from loguru import logger  
-  
-# Fix the imports based on the codebase patterns  
-from models.experimental.SSR.reference.SSR.model.net_blocks import PatchEmbed  
-from models.experimental.SSR.tt.patch_embed import TTPatchEmbed  # Updated path  
-from ttnn.model_preprocessing import preprocess_model_parameters, preprocess_linear_weight, preprocess_linear_bias
-from models.utility_functions import torch_random, tt2torch_tensor, comp_pcc
+import pytest
+import torch
+import ttnn
+from loguru import logger
 
-def create_patch_embed_preprocessor(device):    
-    def custom_preprocessor(torch_model, name, ttnn_module_args):    
-        parameters = {}    
-        if isinstance(torch_model, PatchEmbed):    
-            # Extract Conv2d weights - keep them in 4D format for conv2d  
-            conv_weight = torch_model.proj.weight  # Shape: [out_channels, in_channels, kernel_height, kernel_width]  
-            conv_bias = torch_model.proj.bias      # Shape: [out_channels]  
-                
-            parameters["proj"] = {}    
-            # Keep weights in 4D format and use ROW_MAJOR layout  
-            parameters["proj"]["weight"] = ttnn.from_torch(  
-                conv_weight,   
-                dtype=ttnn.bfloat16,   
-                layout=ttnn.ROW_MAJOR_LAYOUT  
-            )  
-            # Reshape bias to [1, 1, 1, out_channels] format expected by conv2d  
-            conv_bias_reshaped = conv_bias.reshape(1, 1, 1, -1)  
+# Fix the imports based on the codebase patterns
+from models.experimental.SSR.reference.SSR.model.net_blocks import PatchEmbed
+from models.experimental.SSR.tt.patch_embed import TTPatchEmbed  # Updated path
+from ttnn.model_preprocessing import preprocess_model_parameters
+from models.utility_functions import tt2torch_tensor, comp_pcc
+
+
+def create_patch_embed_preprocessor(device):
+    def custom_preprocessor(torch_model, name, ttnn_module_args):
+        parameters = {}
+        if isinstance(torch_model, PatchEmbed):
+            # Extract Conv2d weights - keep them in 4D format for conv2d
+            conv_weight = torch_model.proj.weight  # Shape: [out_channels, in_channels, kernel_height, kernel_width]
+            conv_bias = torch_model.proj.bias  # Shape: [out_channels]
+
+            parameters["proj"] = {}
+            # Keep weights in 4D format and use ROW_MAJOR layout
+            parameters["proj"]["weight"] = ttnn.from_torch(
+                conv_weight, dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT
+            )
+            # Reshape bias to [1, 1, 1, out_channels] format expected by conv2d
+            conv_bias_reshaped = conv_bias.reshape(1, 1, 1, -1)
             # conv_bias_reshaped = conv_bias
-            parameters["proj"]["bias"] = ttnn.from_torch(  
-                conv_bias_reshaped,   
-                dtype=ttnn.bfloat16,   
-                layout=ttnn.ROW_MAJOR_LAYOUT  
-            )  
-                
-        return parameters    
+            parameters["proj"]["bias"] = ttnn.from_torch(
+                conv_bias_reshaped, dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT
+            )
+
+        return parameters
+
     return custom_preprocessor
+
 
 @pytest.mark.parametrize("img_size, ch, patch_size, embed_dim, norm_layer", ((256, 3, 4, 96, None),))
 def test_patch_embed(img_size, ch, patch_size, embed_dim, norm_layer):
@@ -56,7 +54,12 @@ def test_patch_embed(img_size, ch, patch_size, embed_dim, norm_layer):
         device=device,
     )
     tt_layer = TTPatchEmbed(
-        img_size=img_size, patch_size=patch_size, in_chans=ch,  embed_dim=embed_dim, device=device, parameters=parameters,
+        img_size=img_size,
+        patch_size=patch_size,
+        in_chans=ch,
+        embed_dim=embed_dim,
+        device=device,
+        parameters=parameters,
     )
 
     tt_input = ttnn.from_torch(x, device=device, layout=ttnn.TILE_LAYOUT)
@@ -71,4 +74,5 @@ def test_patch_embed(img_size, ch, patch_size, embed_dim, norm_layer):
     else:
         logger.warning("PatchEmbed Failed!")
 
+    ttnn.close_device(device)
     assert does_pass
