@@ -31,7 +31,7 @@ class TTSwinTransformerBlock(LightweightModule):
         self.window_size = window_size
         self.shift_size = shift_size
         self.mlp_ratio = mlp_ratio
-        self.memory_config = memory_config if memory_config is not None else ttnn.DRAM_MEMORY_CONFIG
+        self.memory_config = ttnn.DRAM_MEMORY_CONFIG
 
         # Adjust window_size and shift_size if needed
         if min(self.input_resolution) <= self.window_size:

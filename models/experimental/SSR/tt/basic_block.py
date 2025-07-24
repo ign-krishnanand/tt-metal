@@ -23,7 +23,7 @@ class TTBasicLayer(LightweightModule):
     ):
         super().__init__()
         self.device = device
-        self.memory_config = memory_config or ttnn.DRAM_MEMORY_CONFIG
+        self.memory_config = ttnn.DRAM_MEMORY_CONFIG
         self.dim = dim
         self.input_resolution = input_resolution
         self.depth = depth

@@ -4,7 +4,7 @@ from models.common.lightweightmodule import LightweightModule
 
 class TTMlp(LightweightModule):
     def __init__(self, device, memory_config, in_features, hidden_features=None, out_features=None, parameters=None):
-        self.memory_config = memory_config if memory_config is not None else ttnn.L1_MEMORY_CONFIG
+        self.memory_config = ttnn.DRAM_MEMORY_CONFIG
         self.device = device
 
         self.in_features = in_features
