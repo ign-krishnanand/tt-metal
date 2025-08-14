@@ -27,6 +27,16 @@ class TTChannelAttention(LightweightModule):
         # Global Average Pooling (AdaptiveAvgPool2d(1) equivalent)
         x = ttnn.global_avg_pool2d(x, memory_config=self.memory_config)
 
+        # 180 -> 192 -> 180
+        # if math.log(original_shape[-1], 2) != 0:
+        if original_shape[-1] == 180:
+            x = ttnn.slice(
+                x,
+                starts=[0, 0, 0, 0],  # Start indices for each dimension
+                ends=[original_shape[0], 1, 1, 180],  # End indices - slice to 180 in last dim
+                steps=[1, 1, 1, 1],  # Step size for each dimension
+            )
+
         # First 1x1 convolution (squeeze)
         x = ttnn.conv2d(
             input_tensor=x,
