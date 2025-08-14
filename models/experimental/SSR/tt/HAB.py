@@ -150,7 +150,6 @@ class TTHAB(LightweightModule):
     def forward(self, x, x_size, rpi_sa, attn_mask):
         h, w = x_size
         b, seq_len, c = x.shape
-        # import pdb; pdb.set_trace()
         shortcut = x
 
         # Layer norm 1
