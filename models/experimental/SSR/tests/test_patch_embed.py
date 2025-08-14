@@ -46,6 +46,9 @@ def test_patch_embed(img_size, ch, patch_size, embed_dim, norm_layer):
         embed_dim=embed_dim,
         norm_layer=norm_layer,
     )
+    import pdb
+
+    pdb.set_trace()
     ref_output = ref_layer(x)
     device = ttnn.open_device(device_id=0, l1_small_size=32768)
     parameters = preprocess_model_parameters(
