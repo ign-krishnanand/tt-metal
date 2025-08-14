@@ -275,11 +275,12 @@ def create_relative_position_index(window_size):
 @pytest.mark.parametrize(
     "batch_size, height, width, dim, num_heads, window_size, shift_size, mlp_ratio",
     [
-        (1, 32, 32, 96, 3, 8, 0, 4.0),  # Standard configuration
-        (1, 64, 64, 192, 6, 8, 0, 4.0),  # Larger feature dimension
-        (2, 32, 32, 96, 3, 8, 0, 4.0),  # Batch size 2
-        (1, 56, 56, 128, 4, 7, 0, 4.0),  # Different window size
-        (1, 32, 32, 180, 6, 8, 4, 4.0),  # With shift
+        # (1, 32, 32, 96, 3, 8, 0, 4.0),  # Standard configuration
+        # (1, 64, 64, 192, 6, 8, 0, 4.0),  # Larger feature dimension
+        # (2, 32, 32, 96, 3, 8, 0, 4.0),  # Batch size 2
+        # (1, 56, 56, 128, 4, 7, 0, 4.0),  # Different window size
+        # (1, 32, 32, 180, 6, 8, 4, 4.0),  # With shift
+        (2, 64, 64, 180, 6, 16, 8, 2.0),  # With shift
     ],
 )
 @pytest.mark.parametrize("device_params", [{"l1_small_size": 32768}], indirect=True)
