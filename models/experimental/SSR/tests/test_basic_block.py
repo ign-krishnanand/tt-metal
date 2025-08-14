@@ -78,7 +78,6 @@ def create_basic_layer_preprocessor(device):
 
         # Process each transformer block
         for i, block in enumerate(torch_model.blocks):
-            # import pdb; pdb.set_trace()
             relative_position_bias = block.attn.relative_position_bias_table[
                 block.attn.relative_position_index.view(-1)
             ].view(

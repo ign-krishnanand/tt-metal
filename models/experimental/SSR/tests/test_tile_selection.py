@@ -78,7 +78,6 @@ def create_tile_selection_preprocessor(device):
         for mask_name in ["mask_pre1", "mask_pre2", "mask_pre3"]:
             if hasattr(torch_model, mask_name):
                 mask_module = getattr(torch_model, mask_name)
-                # import pdb; pdb.set_trace()
                 mask_params = preprocess_model_parameters(
                     initialize_model=lambda m=mask_module: m,
                     custom_preprocessor=create_mask_token_inference_preprocessor(device),
