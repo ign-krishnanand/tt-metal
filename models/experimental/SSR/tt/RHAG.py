@@ -159,13 +159,18 @@ class TTRHAG(LightweightModule):
 
         # Pass through residual group (AttenBlocks)
         x = self.residual_group(x, x_size, params)
+        # return x
 
         # Patch unembed: convert from sequence to spatial format
         x = self.patch_unembed(x, x_size)
+        # return x
 
         # Apply convolutional layer
         if self.resi_connection == "1conv":
+            # import pdb; pdb.set_trace()
             batch_size, embed_dim, height, width = x.shape
+            x = ttnn.permute(x, (0, 2, 3, 1))  # (batch_size, embed_dim, num_patches)  
+
 
             # Apply 3x3 convolution with padding=1
             x, [out_height, out_width] = ttnn.conv2d(
@@ -187,18 +192,22 @@ class TTRHAG(LightweightModule):
                 return_output_dim=True,
             )
 
-            x = ttnn.reshape(x, (batch_size, out_height * out_width, self.dim))
-        elif self.resi_connection == "identity":
-            x = ttnn.reshape(x, (x.shape[0], self.input_resolution[0] * self.input_resolution[1], self.dim))
+            x = ttnn.reshape(x, (batch_size, out_height, out_width, self.dim))
+        # elif self.resi_connection == "identity":
+        #     x = ttnn.reshape(x, (x.shape[0], self.input_resolution[0], self.input_resolution[1], self.dim))
             # Identity - no operation needed
             # pass
+        # return x
 
         # Patch embed: convert back to sequence format
         x = self.patch_embed(x)
+        x = ttnn.reshape(x, (x.shape[0], self.input_resolution[0] * self.input_resolution[1], self.dim))
+        # return x
 
-        import pdb
 
-        pdb.set_trace()
+        # import pdb
+
+        # pdb.set_trace()
 
         # Add residual connection
         x = ttnn.add(x, shortcut)
