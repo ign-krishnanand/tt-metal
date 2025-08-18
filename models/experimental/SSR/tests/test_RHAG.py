@@ -94,7 +94,8 @@ def create_rhag_preprocessor(device, depth):
     "batch_size, height, width, dim, num_heads, window_size, depth, overlap_ratio, mlp_ratio, resi_connection",
     [
         # (1, 32, 32, 180, 6, 16, 2, 0.5, 2.0, "1conv"),      # Standard configuration with conv
-        (1, 64, 64, 180, 6, 16, 2, 0.5, 2.0, "1conv"),      # Standard configuration with conv
+        (1, 64, 64, 180, 6, 16, 6, 0.5, 2.0, "1conv"),      # Standard configuration with conv
+        # (1, 64, 64, 180, 6, 16, 2, 0.5, 2.0, "1conv"),      # Standard configuration with conv
         # (1, 32, 32, 96, 3, 8, 3, 0.25, 4.0, "identity"),  # Identity connection
         # (2, 64, 64, 180, 6, 16, 1, 0.5, 2.0, "1conv"),      # Batch size 2
         # (1, 128, 128, 192, 6, 16, 2, 0.75, 3.0, "1conv"),   # Larger resolution

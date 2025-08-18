@@ -193,7 +193,9 @@ class TTRHAG(LightweightModule):
             )
 
             x = ttnn.reshape(x, (batch_size, out_height, out_width, self.dim))
-        # elif self.resi_connection == "identity":
+        elif self.resi_connection == "identity":
+            x = ttnn.permute(x, (0, 2, 3, 1))  # (batch_size, embed_dim, num_patches)  
+
         #     x = ttnn.reshape(x, (x.shape[0], self.input_resolution[0], self.input_resolution[1], self.dim))
             # Identity - no operation needed
             # pass
@@ -201,6 +203,10 @@ class TTRHAG(LightweightModule):
 
         # Patch embed: convert back to sequence format
         x = self.patch_embed(x)
+        # import pdb
+
+        # pdb.set_trace()
+
         x = ttnn.reshape(x, (x.shape[0], self.input_resolution[0] * self.input_resolution[1], self.dim))
         # return x
 
