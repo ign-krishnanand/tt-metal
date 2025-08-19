@@ -1002,6 +1002,7 @@ class HAT(nn.Module):
         }
 
         x = self.patch_embed(x)
+        return x
         if self.ape:
             x = x + self.absolute_pos_embed
         x = self.pos_drop(x)
@@ -1105,6 +1106,7 @@ class TileRefinement(HAT):
         if self.upsampler == "pixelshuffle":
             # for classical SR
             x = self.conv_first(x)
+            return x
             fea = self.forward_features(x)  # 1, C, 64, 64
             x = self.conv_after_body(fea) + x
             x = self.conv_before_upsample(x)
