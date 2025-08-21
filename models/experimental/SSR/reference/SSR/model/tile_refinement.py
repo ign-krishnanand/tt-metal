@@ -1002,15 +1002,14 @@ class HAT(nn.Module):
         }
 
         x = self.patch_embed(x)
-        return x
         if self.ape:
             x = x + self.absolute_pos_embed
         x = self.pos_drop(x)
 
         for layer in self.layers:
             x = layer(x, x_size, params)
-
         x = self.norm(x)  # b seq_len c
+        # return x
         x = self.patch_unembed(x, x_size)
 
         return x
@@ -1106,11 +1105,12 @@ class TileRefinement(HAT):
         if self.upsampler == "pixelshuffle":
             # for classical SR
             x = self.conv_first(x)
-            return x
             fea = self.forward_features(x)  # 1, C, 64, 64
             x = self.conv_after_body(fea) + x
             x = self.conv_before_upsample(x)
-            x = self.conv_last(self.upsample(x))
+            x = self.upsample(x)
+            x = self.conv_last(x)
+            # return x, fea
 
         x = x / self.img_range + self.mean
 

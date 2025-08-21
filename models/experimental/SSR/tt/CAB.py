@@ -35,8 +35,6 @@ class TTCAB(LightweightModule):
         # Store original input shape for convolutions
         batch_size, height, width, channels = x.shape
 
-        print(f"{x.shape=}")
-
         # First 3x3 convolution (compression)
         x = ttnn.conv2d(
             input_tensor=x,
