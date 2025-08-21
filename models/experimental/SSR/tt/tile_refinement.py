@@ -3,6 +3,8 @@ import ttnn
 from models.common.lightweightmodule import LightweightModule
 from models.experimental.SSR.tt.patch_embed_tile_refinement import TTPatchEmbed
 from models.experimental.SSR.tt.RHAG import TTRHAG
+from models.experimental.SSR.tt.patch_unembed import TTPatchUnEmbed
+from models.experimental.SSR.tt.upsample import TTUpsample
 
 
 class TTHAT(LightweightModule):
@@ -52,11 +54,12 @@ class TTHAT(LightweightModule):
         self.upsampler = upsampler
         self.embed_dim = embed_dim
         self.num_layers = len(depths)
-        self.memory_config = memory_config or ttnn.DRAM_MEMORY_CONFIG
+        self.memory_config = ttnn.DRAM_MEMORY_CONFIG
         self.h = h
         self.w = w
         self.ape = ape
         self.layers = []
+        num_feat = 64
 
         # import pdb; pdb.set_trace()
         self.patch_embed = TTPatchEmbed(
@@ -64,7 +67,7 @@ class TTHAT(LightweightModule):
             patch_size=patch_size,
             in_chans=0,  # Set to 0 as in original
             embed_dim=180,
-            norm_layer=None,
+            norm_layer=1,
             device=device,
             parameters=parameters["patch_embed"],
             memory_config=memory_config,
@@ -74,7 +77,7 @@ class TTHAT(LightweightModule):
             layer = TTRHAG(
                 device=device,
                 parameters=self.parameters[f"layers.{i_layer}"],
-                dim=6,
+                dim=embed_dim,
                 input_resolution=(64, 64),
                 depth=6,
                 num_heads=num_heads[i_layer],
@@ -90,6 +93,12 @@ class TTHAT(LightweightModule):
                 memory_config=ttnn.DRAM_MEMORY_CONFIG,
             )
             self.layers.append(layer)
+
+        self.patch_unembed = TTPatchUnEmbed(
+            mesh_device=device, img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim
+        )
+
+        self.upsample = TTUpsample(upscale, num_feat, device)
 
         # Mean normalization values
         if in_chans == 3:
@@ -147,18 +156,16 @@ class TTHAT(LightweightModule):
 
         # Patch embedding
         x = self.patch_embed(x)
-        return x
 
         # Add absolute position embedding if enabled
         if self.ape and hasattr(self.parameters, "absolute_pos_embed"):
             x = ttnn.add(x, self.parameters.absolute_pos_embed, memory_config=self.memory_config)
         # Apply transformer layers
-        print("TR X", x.shape)
+        x = ttnn.reshape(x, [x.shape[0], x.shape[1] * x.shape[2], x.shape[3]])
         for i in range(self.num_layers):
-            # import pdb; pdb.set_trace()
-
             x = self.layers[i](x, x_size, self.parameters["forward_params"])
 
+        print("TR X", x.shape)
         # Layer normalization
         x = ttnn.layer_norm(
             x,
@@ -166,9 +173,10 @@ class TTHAT(LightweightModule):
             bias=self.parameters.norm.bias,
             memory_config=self.memory_config,
         )
+        # return x
 
         # Patch unembedding
-        x = self.parameters.patch_unembed(x, x_size)
+        x = self.patch_unembed(x, x_size)
 
         return x
 
@@ -305,59 +313,109 @@ class TTTileRefinement(TTHAT):
                 memory_config=ttnn.DRAM_MEMORY_CONFIG,
                 # slice_config=slice_config,
             )
-            x = ttnn.reshape(x, [1, 64, 64, 180])
+            x = ttnn.reshape(x, [1, 64, 64, 180])  # TODO
             x = ttnn.permute(x, (0, 3, 1, 2))
             print("TT OUT: ", x.shape)
-            return x
 
             # Deep feature extraction - store as fea
             fea = self.forward_features(x)
 
             # Residual connection after body (using fea, not x like in HAT)
+            self.conv_afterbody_config = ttnn.Conv2dConfig(
+                weights_dtype=ttnn.bfloat16,
+                activation="",
+                output_layout=ttnn.TILE_LAYOUT,
+                deallocate_activation=False,  # Free input memory after use
+                reallocate_halo_output=True,  # Reduce memory fragmentation
+                act_block_h_override=32,  # Use smaller activation blocks
+                shard_layout=ttnn.TensorMemoryLayout.HEIGHT_SHARDED,  # Use height sharding
+            )
+            fea = ttnn.permute(fea, (0, 2, 3, 1))
             x_after_body = ttnn.conv2d(
-                fea,
-                self.parameters.conv_after_body.weight,
-                bias=self.parameters.conv_after_body.bias,
+                input_tensor=fea,
+                weight_tensor=self.parameters["conv_after_body"]["weight"],
+                bias_tensor=self.parameters["conv_after_body"]["bias"],
+                in_channels=180,
+                out_channels=180,
+                device=self.device,
                 kernel_size=(3, 3),
                 stride=(1, 1),
                 padding=(1, 1),
-                device=self.device,
-                memory_config=self.memory_config,
+                batch_size=fea.shape[0],
+                input_height=fea.shape[1],
+                input_width=fea.shape[2],
+                # dilation= [1, 1],
+                conv_config=self.conv_afterbody_config,
+                compute_config=self.compute_config,
+                return_output_dim=False,
+                return_weights_and_bias=False,
+                dtype=ttnn.bfloat16,
+                memory_config=ttnn.DRAM_MEMORY_CONFIG,
             )
+            x_after_body = ttnn.reshape(x_after_body, [1, 64, 64, 180])  # TODO
+            x = ttnn.permute(x, (0, 2, 3, 1))
             x = ttnn.add(x, x_after_body, memory_config=self.memory_config)
 
+            # return x, fea
+
+            # import pdb; pdb.set_trace()
             # Pre-upsample convolution
             x = ttnn.conv2d(
-                x,
-                self.parameters.conv_before_upsample.weight,
-                bias=self.parameters.conv_before_upsample.bias,
+                input_tensor=x,
+                weight_tensor=self.parameters.conv_before_upsample.weight,
+                bias_tensor=self.parameters.conv_before_upsample.bias,
+                in_channels=180,
+                out_channels=64,
+                device=self.device,
                 kernel_size=(3, 3),
                 stride=(1, 1),
                 padding=(1, 1),
-                device=self.device,
+                batch_size=x.shape[0],
+                input_height=x.shape[1],
+                input_width=x.shape[2],
+                conv_config=self.conv_config,
+                compute_config=self.compute_config,
                 memory_config=self.memory_config,
+                dtype=ttnn.bfloat16,
+                return_weights_and_bias=False,
             )
 
             # LeakyReLU activation
-            x = ttnn.leaky_relu(x, negative_slope=0.01)
+            x = ttnn.leaky_relu(x, negative_slope=0.01, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            x = ttnn.reshape(x, [1, 64, 64, 64])  # TODO
+
+            # x = ttnn.permute(x, (0, 3, 1, 2))
 
             # Upsampling
-            x = self.parameters.upsample(x)
+            x = self.upsample(x, self.parameters["upsample"])
 
             # Final convolution
             x = ttnn.conv2d(
-                x,
-                self.parameters.conv_last.weight,
-                bias=self.parameters.conv_last.bias,
+                input_tensor=x,
+                weight_tensor=self.parameters.conv_last.weight,
+                bias_tensor=self.parameters.conv_last.bias,
+                in_channels=64,
+                out_channels=3,
+                device=self.device,
                 kernel_size=(3, 3),
                 stride=(1, 1),
                 padding=(1, 1),
-                device=self.device,
+                batch_size=x.shape[0],
+                input_height=x.shape[1],
+                input_width=x.shape[2],
+                conv_config=self.conv_config,
+                compute_config=self.compute_config,
                 memory_config=self.memory_config,
+                dtype=ttnn.bfloat16,
+                return_weights_and_bias=False,
             )
 
+            x = ttnn.reshape(x, [1, 256, 256, 3])  # TODO
+            # return x, fea
         # Denormalize output
+        # import pdb; pdb.set_trace()
         x = ttnn.divide(x, self.img_range, memory_config=self.memory_config)
+        self.mean = ttnn.permute(self.mean, (0, 2, 3, 1))
         x = ttnn.add(x, self.mean, memory_config=self.memory_config)
 
         return x, fea

@@ -167,10 +167,8 @@ class TTRHAG(LightweightModule):
 
         # Apply convolutional layer
         if self.resi_connection == "1conv":
-            # import pdb; pdb.set_trace()
             batch_size, embed_dim, height, width = x.shape
-            x = ttnn.permute(x, (0, 2, 3, 1))  # (batch_size, embed_dim, num_patches)  
-
+            x = ttnn.permute(x, (0, 2, 3, 1))  # (batch_size, embed_dim, num_patches)
 
             # Apply 3x3 convolution with padding=1
             x, [out_height, out_width] = ttnn.conv2d(
@@ -194,11 +192,11 @@ class TTRHAG(LightweightModule):
 
             x = ttnn.reshape(x, (batch_size, out_height, out_width, self.dim))
         elif self.resi_connection == "identity":
-            x = ttnn.permute(x, (0, 2, 3, 1))  # (batch_size, embed_dim, num_patches)  
+            x = ttnn.permute(x, (0, 2, 3, 1))  # (batch_size, embed_dim, num_patches)
 
         #     x = ttnn.reshape(x, (x.shape[0], self.input_resolution[0], self.input_resolution[1], self.dim))
-            # Identity - no operation needed
-            # pass
+        # Identity - no operation needed
+        # pass
         # return x
 
         # Patch embed: convert back to sequence format
@@ -209,7 +207,6 @@ class TTRHAG(LightweightModule):
 
         x = ttnn.reshape(x, (x.shape[0], self.input_resolution[0] * self.input_resolution[1], self.dim))
         # return x
-
 
         # import pdb
 

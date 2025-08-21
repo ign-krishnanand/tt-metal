@@ -71,6 +71,7 @@ class TTPatchEmbed(LightweightModule):
 
         # Apply normalization if available
         if self.norm_weight is not None:
+            x = ttnn.permute(x, [0, 2, 3, 1])
             x = ttnn.layer_norm(x, weight=self.norm_weight, bias=self.norm_bias, memory_config=self.memory_config)
 
         return x
