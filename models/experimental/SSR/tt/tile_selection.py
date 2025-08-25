@@ -89,9 +89,6 @@ class TTTileSelection(LightweightModule):
             out_features=final_dim,
             parameters=parameters["fea_mlp1"],
         )
-        print("#############################")
-        print(parameters["mask_pre3"])
-        print("#############################")
         # Initialize mask token inference modules
         self.mask_pre3 = TTMaskTokenInference(
             device=device, parameters=parameters["mask_pre3"], dim=final_dim, num_heads=1

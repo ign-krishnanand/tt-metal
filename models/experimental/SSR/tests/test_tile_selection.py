@@ -11,6 +11,7 @@ from models.experimental.SSR.tests.test_basic_block import create_basic_layer_pr
 from models.experimental.SSR.tests.test_mlp import create_mlp_preprocessor
 from models.experimental.SSR.tests.test_mask_token_inference import create_mask_token_inference_preprocessor
 from models.utility_functions import tt2torch_tensor, comp_pcc
+from models.utility_functions import profiler
 
 
 def create_tile_selection_preprocessor(device):
@@ -141,12 +142,21 @@ def test_tile_selection(image_size, patch_size, token_size, num_cls):
         tt_input = ttnn.from_torch(input_tensor, device=device, layout=ttnn.TILE_LAYOUT)
 
         # Run TTNN implementation
+        profiler.start("warmUpRun")
         tt_output = tt_layer(tt_input)
+        profiler.end("warmUpRun")
+
+        profiler.start("actualRun")
+        tt_output = tt_layer(tt_input)
+        profiler.end("actualRun")
 
         # Convert outputs back to torch for comparison
         tt_mask_3 = tt2torch_tensor(tt_output[0])
         tt_mask_2 = tt2torch_tensor(tt_output[1])
         tt_mask_1 = tt2torch_tensor(tt_output[2])
+
+        warmup_run_time = profiler.get("warmUpRun")
+        actual_run_time = profiler.get("actualRun")
 
         # Compare outputs with appropriate PCC thresholds
         does_pass_3, pcc_message_3 = comp_pcc(ref_output[0], tt_mask_3, 0.98)
@@ -158,6 +168,10 @@ def test_tile_selection(image_size, patch_size, token_size, num_cls):
         logger.info(f"Scale 1 PCC: {pcc_message_1}")
 
         overall_pass = does_pass_3 and does_pass_2 and does_pass_1
+
+        logger.info(f"Warmup Run: {warmup_run_time} s")
+        logger.info(f"Actual Run: {actual_run_time} s")
+        logger.info(f"Throughput: {batch_size/actual_run_time}")
 
         if overall_pass:
             logger.info("TileSelection Passed!")
