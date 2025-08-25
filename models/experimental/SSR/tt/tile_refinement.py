@@ -61,7 +61,6 @@ class TTHAT(LightweightModule):
         self.layers = []
         num_feat = 64
 
-        # import pdb; pdb.set_trace()
         self.patch_embed = TTPatchEmbed(
             img_size=img_size,
             patch_size=patch_size,
@@ -146,13 +145,13 @@ class TTHAT(LightweightModule):
         """Forward pass through transformer layers"""
         x_size = (self.h, self.w)
 
-        # Calculate attention mask
-        attn_mask = self.calculate_mask(x_size)
-        # params = {
-        #     "attn_mask": attn_mask,
-        #     "rpi_sa": self.parameters.relative_position_index_SA,
-        #     "rpi_oca": self.parameters.relative_position_index_OCA,
-        # }
+        # # Calculate attention mask
+        # attn_mask = self.calculate_mask(x_size)
+        # # params = {
+        # #     "attn_mask": attn_mask,
+        # #     "rpi_sa": self.parameters.relative_position_index_SA,
+        # #     "rpi_oca": self.parameters.relative_position_index_OCA,
+        # # }
 
         # Patch embedding
         x = self.patch_embed(x)
@@ -165,7 +164,6 @@ class TTHAT(LightweightModule):
         for i in range(self.num_layers):
             x = self.layers[i](x, x_size, self.parameters["forward_params"])
 
-        print("TR X", x.shape)
         # Layer normalization
         x = ttnn.layer_norm(
             x,
@@ -263,6 +261,7 @@ class TTTileRefinement(TTHAT):
     def forward(self, x):
         """Forward pass that returns both output and features"""
         # Normalize input
+        batch_size = x.shape[0]
         self.mean = ttnn.to_layout(self.mean, ttnn.TILE_LAYOUT)
         x = ttnn.subtract(x, self.mean, memory_config=self.memory_config)
         x = ttnn.multiply(x, self.img_range, memory_config=self.memory_config)
@@ -286,10 +285,6 @@ class TTTileRefinement(TTHAT):
                 fp32_dest_acc_en=False,
                 packer_l1_acc=False,
             )
-            slice_config = ttnn.Conv2dSliceConfig(
-                slice_type=ttnn.Conv2dSliceHeight, num_slices=4  # Adjust based on memory constraints
-            )
-            print("X input: ", x.shape)
             x = ttnn.conv2d(
                 input_tensor=x,
                 weight_tensor=self.parameters["conv_first"]["weight"],
@@ -313,9 +308,8 @@ class TTTileRefinement(TTHAT):
                 memory_config=ttnn.DRAM_MEMORY_CONFIG,
                 # slice_config=slice_config,
             )
-            x = ttnn.reshape(x, [1, 64, 64, 180])  # TODO
+            x = ttnn.reshape(x, [batch_size, 64, 64, 180])  # TODO
             x = ttnn.permute(x, (0, 3, 1, 2))
-            print("TT OUT: ", x.shape)
 
             # Deep feature extraction - store as fea
             fea = self.forward_features(x)
@@ -352,13 +346,10 @@ class TTTileRefinement(TTHAT):
                 dtype=ttnn.bfloat16,
                 memory_config=ttnn.DRAM_MEMORY_CONFIG,
             )
-            x_after_body = ttnn.reshape(x_after_body, [1, 64, 64, 180])  # TODO
+            x_after_body = ttnn.reshape(x_after_body, [batch_size, 64, 64, 180])  # TODO
             x = ttnn.permute(x, (0, 2, 3, 1))
             x = ttnn.add(x, x_after_body, memory_config=self.memory_config)
 
-            # return x, fea
-
-            # import pdb; pdb.set_trace()
             # Pre-upsample convolution
             x = ttnn.conv2d(
                 input_tensor=x,
@@ -382,7 +373,7 @@ class TTTileRefinement(TTHAT):
 
             # LeakyReLU activation
             x = ttnn.leaky_relu(x, negative_slope=0.01, memory_config=ttnn.DRAM_MEMORY_CONFIG)
-            x = ttnn.reshape(x, [1, 64, 64, 64])  # TODO
+            x = ttnn.reshape(x, [batch_size, 64, 64, 64])  # TODO
 
             # x = ttnn.permute(x, (0, 3, 1, 2))
 
@@ -410,12 +401,11 @@ class TTTileRefinement(TTHAT):
                 return_weights_and_bias=False,
             )
 
-            x = ttnn.reshape(x, [1, 256, 256, 3])  # TODO
-            # return x, fea
+            x = ttnn.reshape(x, [batch_size, 256, 256, 3])  # TODO
         # Denormalize output
-        # import pdb; pdb.set_trace()
         x = ttnn.divide(x, self.img_range, memory_config=self.memory_config)
         self.mean = ttnn.permute(self.mean, (0, 2, 3, 1))
         x = ttnn.add(x, self.mean, memory_config=self.memory_config)
+        self.mean = ttnn.permute(self.mean, (0, 3, 1, 2))
 
         return x, fea

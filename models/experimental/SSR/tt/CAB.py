@@ -17,7 +17,6 @@ class TTCAB(LightweightModule):
 
         # Extract preprocessed parameters for convolutions
         self.conv1_weight = parameters["conv1"]["weight"]
-        print(f"{self.conv1_weight.shape=}")
         self.conv1_bias = parameters["conv1"]["bias"]
         self.conv2_weight = parameters["conv2"]["weight"]
         self.conv2_bias = parameters["conv2"]["bias"]
@@ -51,8 +50,6 @@ class TTCAB(LightweightModule):
             padding=(1, 1),
             memory_config=self.memory_config,
         )
-
-        print(f"{x.shape=}")
 
         # Reshape from flattened conv output back to spatial format
         x = ttnn.reshape(x, [batch_size, height, width, self.num_feat // self.compress_ratio])

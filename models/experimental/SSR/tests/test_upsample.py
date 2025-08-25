@@ -34,14 +34,6 @@ def create_upsample_preprocessor(device):
                             torch.reshape(layer.bias, (1, 1, 1, -1)), dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT
                         )
                     conv_idx += 1
-        # weights = []
-        # biases = []
-        # conv_idx = 0
-
-        # for _ in range(model.num_ops):
-        #     weights.append(parameters[f"conv_{conv_idx}"]["weight"])
-        #     biases.append(parameters[f"conv_{conv_idx}"]["bias"])
-        #     conv_idx += 1
 
         return parameters
 
@@ -52,7 +44,7 @@ def create_upsample_preprocessor(device):
 @pytest.mark.parametrize("scale", [4])
 @pytest.mark.parametrize("num_feat", [64])
 @pytest.mark.parametrize("batch_size", [1])
-@pytest.mark.parametrize("input_size", [64])
+@pytest.mark.parametrize("input_size", [256])
 def test_upsample(device, scale, num_feat, batch_size, input_size):
     """Test Upsample block against PyTorch reference"""
     torch.manual_seed(0)
@@ -70,6 +62,7 @@ def test_upsample(device, scale, num_feat, batch_size, input_size):
     # Create test input
     torch_input = torch.randn(batch_size, num_feat, input_size, input_size)
     torch_output = torch_model(torch_input)
+    print("LIKEEEEEEEEEE:", torch_output.shape)
 
     # Preprocess model parameters
     parameters = preprocess_model_parameters(

@@ -10,7 +10,7 @@ from models.experimental.SSR.tests.test_RHAG import create_rhag_preprocessor
 from models.experimental.SSR.tests.test_upsample import create_upsample_preprocessor
 from models.experimental.SSR.tt.tile_refinement import TTTileRefinement
 from models.experimental.SSR.tests.test_HAB import create_relative_position_index
-
+from models.utility_functions import profiler
 
 from ttnn.model_preprocessing import preprocess_model_parameters
 from models.utility_functions import (
@@ -194,7 +194,7 @@ def create_tile_refinement_preprocessor(device, forward_params):
         # Test configuration - adjust based on your requirements
         # (64, 1, 96, (2, 2), (6, 6), 7, 4, 2, (1, 3, 64, 64)),
         # (64, 1, 180, (2, 2, 2), (6, 6, 6), 16, 2, 4, (1, 3, 64, 64)),
-        (64, 1, 180, (6, 6, 6, 6, 6, 6), (6, 6, 6, 6, 6, 6), 16, 2, 4, (1, 3, 64, 64)),
+        (64, 1, 180, (6, 6, 6, 6, 6, 6), (6, 6, 6, 6, 6, 6), 16, 2, 4, (3, 3, 64, 64)),
     ],
 )
 def test_tile_refinement(
@@ -305,25 +305,35 @@ def test_tile_refinement(
         tt_input = ttnn.from_torch(x, device=device, layout=ttnn.TILE_LAYOUT)
 
         # Run TTNN model
+        profiler.start("warmUpRun")
         tt_output, tt_features = tt_model(tt_input)
-        # tt_output = tt_model(tt_input)
+        profiler.end("warmUpRun")
+
+        profiler.start("actualRun")
+        tt_output, tt_features = tt_model(tt_input)
+        profiler.end("actualRun")
 
         # Convert back to torch tensors
         tt_torch_output = tt2torch_tensor(tt_output)
         tt_torch_features = tt2torch_tensor(tt_features)
+
+        warmup_run_time = profiler.get("warmUpRun")
+        actual_run_time = profiler.get("actualRun")
+
         tt_torch_output = tt_torch_output.permute(0, 3, 1, 2)
         tt_torch_features = tt_torch_features.permute(0, 3, 1, 2)
 
         # Compare outputs
-        import pdb
-
-        pdb.set_trace()
-        print("Torch OUT: ", ref_output.shape, tt_torch_output.shape)
+        print("Torch OUT: ", ref_output.shape, tt_torch_output.shape, input_shape)
         output_pass, output_pcc_message = comp_pcc(ref_output, tt_torch_output, 0.95)
         features_pass, features_pcc_message = comp_pcc(ref_features, tt_torch_features, 0.95)
 
         logger.info(f"Output PCC: {output_pcc_message}")
         logger.info(f"Features PCC: {features_pcc_message}")
+
+        logger.info(f"Warmup Run: {warmup_run_time} s")
+        logger.info(f"Actual Run: {actual_run_time} s")
+        logger.info(f"Throughput: {input_shape[0]/actual_run_time}")
 
         if output_pass and features_pass:
             # if output_pass:  # and features_pass:
