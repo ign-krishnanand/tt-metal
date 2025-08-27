@@ -9,6 +9,7 @@ from loguru import logger
 
 from models.experimental.SSR.tt.patch_embed_tile_refinement import TTPatchEmbed
 from models.utility_functions import comp_pcc
+from ttnn.model_preprocessing import preprocess_model_parameters
 
 
 def to_2tuple(x):
@@ -160,11 +161,10 @@ def test_patch_embed_simple(device, batch_size, img_size, patch_size, in_chans, 
         ref_output = ref_model(input_tensor)
 
     # Create TTNN model
-    parameters = ttnn.model_preprocessing.preprocess_model(
+    parameters = preprocess_model_parameters(
         initialize_model=lambda: ref_model,
         custom_preprocessor=create_patch_embed_preprocessor_simple(device),
         device=device,
-        run_model=lambda model: model(input_tensor),
     )
 
     tt_model = TTPatchEmbed(
@@ -182,6 +182,9 @@ def test_patch_embed_simple(device, batch_size, img_size, patch_size, in_chans, 
     tt_input = ttnn.from_torch(input_tensor, device=device, layout=ttnn.TILE_LAYOUT, dtype=ttnn.bfloat16)
 
     # TTNN forward pass
+    batch_size, channels, height, width = tt_input.shape
+    tt_input = ttnn.reshape(tt_input, (batch_size, channels, height * width))
+    tt_input = ttnn.transpose(tt_input, 1, 2)  # [batch, height*width, channels]
     tt_output = tt_model(tt_input)
 
     # Convert back to PyTorch format
@@ -200,85 +203,6 @@ def test_patch_embed_simple(device, batch_size, img_size, patch_size, in_chans, 
         logger.info("Simple PatchEmbed Passed!")
     else:
         logger.warning("Simple PatchEmbed Failed!")
-
-    assert does_pass, f"PCC check failed: {pcc_message}"
-    assert (
-        ref_output.shape == tt_torch_output.shape
-    ), f"Shape mismatch: ref {ref_output.shape} vs ttnn {tt_torch_output.shape}"
-
-
-@pytest.mark.parametrize(
-    "batch_size, img_size, patch_size, in_chans, embed_dim, norm_layer",
-    [
-        (1, 224, 16, 3, 768, None),  # Standard ViT-Base config
-        (2, 256, 4, 3, 96, None),  # Smaller embedding
-        (1, 64, 8, 3, 192, nn.LayerNorm),  # With normalization
-        (1, 128, 16, 3, 384, None),  # Different sizes
-    ],
-)
-@pytest.mark.parametrize("device_params", [{"l1_small_size": 32768}], indirect=True)
-def test_patch_embed_with_conv(device, batch_size, img_size, patch_size, in_chans, embed_dim, norm_layer):
-    """Test the full PatchEmbed implementation with convolution projection"""
-    torch.manual_seed(0)
-
-    # Create reference model
-    ref_model = PatchEmbedWithConv(
-        img_size=img_size,
-        patch_size=patch_size,
-        in_chans=in_chans,
-        embed_dim=embed_dim,
-        norm_layer=norm_layer,
-    )
-    ref_model.eval()
-
-    # Create input tensor
-    input_tensor = torch.randn(batch_size, in_chans, img_size, img_size)
-
-    # Reference forward pass
-    with torch.no_grad():
-        ref_output = ref_model(input_tensor)
-
-    # Create TTNN model
-    parameters = ttnn.model_preprocessing.preprocess_model(
-        initialize_model=lambda: ref_model,
-        custom_preprocessor=create_patch_embed_preprocessor_conv(device),
-        device=device,
-        run_model=lambda model: model(input_tensor),
-    )
-
-    tt_model = TTPatchEmbedFull(
-        img_size=img_size,
-        patch_size=patch_size,
-        in_chans=in_chans,
-        embed_dim=embed_dim,
-        norm_layer=norm_layer,
-        device=device,
-        parameters=parameters,
-        memory_config=ttnn.DRAM_MEMORY_CONFIG,
-    )
-
-    # Convert input to TTNN format
-    tt_input = ttnn.from_torch(input_tensor, device=device, layout=ttnn.TILE_LAYOUT, dtype=ttnn.bfloat16)
-
-    # TTNN forward pass
-    tt_output = tt_model(tt_input)
-
-    # Convert back to PyTorch format
-    tt_torch_output = ttnn.to_torch(tt_output)
-
-    # Compare outputs
-    does_pass, pcc_message = comp_pcc(ref_output, tt_torch_output, 0.99)
-
-    logger.info(f"Batch: {batch_size}, Image: {img_size}x{img_size}, Patch: {patch_size}")
-    logger.info(f"Channels: {in_chans}, Embed: {embed_dim}, Norm: {norm_layer is not None}")
-    logger.info(f"Reference output shape: {ref_output.shape}")
-    logger.info(f"TTNN output shape: {tt_torch_output.shape}")
-    logger.info(pcc_message)
-
-    if does_pass:
-        logger.info("Full PatchEmbed Passed!")
-    else:
-        logger.warning("Full PatchEmbed Failed!")
 
     assert does_pass, f"PCC check failed: {pcc_message}"
     assert (

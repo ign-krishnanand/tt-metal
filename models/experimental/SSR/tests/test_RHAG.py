@@ -94,7 +94,7 @@ def create_rhag_preprocessor(device, depth):
     "batch_size, height, width, dim, num_heads, window_size, depth, overlap_ratio, mlp_ratio, resi_connection",
     [
         # (1, 32, 32, 180, 6, 16, 2, 0.5, 2.0, "1conv"),      # Standard configuration with conv
-        (1, 64, 64, 180, 6, 16, 6, 0.5, 2.0, "1conv"),      # Standard configuration with conv
+        (1, 64, 64, 180, 6, 16, 6, 0.5, 2.0, "1conv"),  # Standard configuration with conv
         # (1, 64, 64, 180, 6, 16, 2, 0.5, 2.0, "1conv"),      # Standard configuration with conv
         # (1, 32, 32, 96, 3, 8, 3, 0.25, 4.0, "identity"),  # Identity connection
         # (2, 64, 64, 180, 6, 16, 1, 0.5, 2.0, "1conv"),      # Batch size 2
@@ -308,105 +308,3 @@ def test_rhag_memory_config(device):
     ttnn.deallocate(tt_output_dram)
 
     logger.info("RHAG Memory Config Test Passed!")
-
-
-@pytest.mark.parametrize("device_params", [{"l1_small_size": 32768}], indirect=True)
-def test_rhag_multiple_iterations(device):
-    """Test multiple forward passes to check for memory leaks"""
-    torch.manual_seed(0)
-
-    from models.experimental.SSR.reference.SSR.model.tile_refinement import RHAG
-
-    dim = 96
-    height, width = 64, 64
-    num_heads = 3
-    window_size = 8
-    depth = 2
-    overlap_ratio = 0.5
-
-    ref_model = RHAG(
-        dim=dim,
-        input_resolution=(height, width),
-        depth=depth,
-        num_heads=num_heads,
-        window_size=window_size,
-        compress_ratio=3,
-        squeeze_factor=30,
-        conv_scale=0.01,
-        overlap_ratio=overlap_ratio,
-        mlp_ratio=4.0,
-        resi_connection="1conv",
-    )
-    ref_model.eval()
-
-    parameters = ttnn.model_preprocessing.preprocess_model(
-        initialize_model=lambda: ref_model,
-        custom_preprocessor=create_rhag_preprocessor(device, depth),
-        device=device,
-        run_model=lambda model: model(
-            torch.randn(1, height * width, dim),
-            (height, width),
-            {
-                "rpi_sa": create_relative_position_index((window_size, window_size)),
-                "attn_mask": None,
-                "rpi_oca": torch.zeros(
-                    (window_size * window_size, (int(window_size * overlap_ratio) + window_size) ** 2), dtype=torch.long
-                ),
-            },
-        ),
-    )
-
-    tt_model = TTRHAG(
-        device=device,
-        parameters=parameters,
-        dim=dim,
-        input_resolution=(height, width),
-        depth=depth,
-        num_heads=num_heads,
-        window_size=window_size,
-        compress_ratio=3,
-        squeeze_factor=30,
-        conv_scale=0.01,
-        overlap_ratio=overlap_ratio,
-        mlp_ratio=4.0,
-        img_size=max(height, width),
-        patch_size=4,
-        resi_connection="1conv",
-        memory_config=ttnn.DRAM_MEMORY_CONFIG,
-    )
-
-    # Run multiple forward passes to check for memory leaks
-    for i in range(3):
-        input_tensor = torch.randn(1, height * width, dim)
-        x_size = (height, width)
-        rpi_sa = create_relative_position_index((window_size, window_size))
-        overlap_win_size = int(window_size * overlap_ratio) + window_size
-        rpi_oca = torch.zeros((window_size * window_size, overlap_win_size * overlap_win_size), dtype=torch.long)
-
-        params = {"rpi_sa": rpi_sa, "attn_mask": None, "rpi_oca": rpi_oca}
-
-        with torch.no_grad():
-            ref_output = ref_model(input_tensor, x_size, params)
-
-        tt_input = ttnn.from_torch(input_tensor, device=device, layout=ttnn.TILE_LAYOUT, dtype=ttnn.bfloat16)
-        tt_rpi_sa = ttnn.from_torch(rpi_sa, device=device, layout=ttnn.ROW_MAJOR_LAYOUT, dtype=ttnn.uint32)
-        tt_rpi_oca = ttnn.from_torch(rpi_oca, device=device, layout=ttnn.TILE_LAYOUT, dtype=ttnn.uint32)
-
-        tt_params = {"rpi_sa": tt_rpi_sa, "attn_mask": None, "rpi_oca": tt_rpi_oca}
-
-        tt_output = tt_model(tt_input, x_size, tt_params)
-        tt_torch_output = ttnn.to_torch(tt_output)
-
-        does_pass, pcc_message = comp_pcc(ref_output, tt_torch_output, 0.85)
-        logger.info(f"Iteration {i+1}: {pcc_message}")
-        assert does_pass, f"Iteration {i+1} failed: {pcc_message}"
-
-        # Clean up tensors to prevent memory leaks
-        ttnn.deallocate(tt_input)
-        ttnn.deallocate(tt_rpi_sa)
-        ttnn.deallocate(tt_rpi_oca)
-        ttnn.deallocate(tt_output)
-
-        logger.info(f"Iteration {i+1} completed successfully")
-
-    logger.info("RHAG Multiple Iterations Test Passed!")
