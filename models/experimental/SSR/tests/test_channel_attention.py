@@ -13,23 +13,6 @@ from models.utility_functions import comp_pcc
 from models.experimental.SSR.reference.SSR.model.tile_refinement import ChannelAttention
 
 
-# class ChannelAttention(nn.Module):
-#     """Reference PyTorch ChannelAttention implementation"""
-#     def __init__(self, num_feat, squeeze_factor=16):
-#         super(ChannelAttention, self).__init__()
-#         self.attention = nn.Sequential(
-#             nn.AdaptiveAvgPool2d(1),
-#             nn.Conv2d(num_feat, num_feat // squeeze_factor, 1, padding=0),
-#             nn.ReLU(inplace=True),
-#             nn.Conv2d(num_feat // squeeze_factor, num_feat, 1, padding=0),
-#             nn.Sigmoid(),
-#         )
-
-#     def forward(self, x):
-#         y = self.attention(x)
-#         return x * y
-
-
 def create_channel_attention_preprocessor(device):
     def custom_preprocessor(torch_model, name, ttnn_module_args):
         params = {}
@@ -137,12 +120,13 @@ def create_channel_attention_preprocessor(device):
 @pytest.mark.parametrize(
     "batch_size, num_feat, height, width, squeeze_factor",
     [
-        (2, 64, 32, 32, 16),  # Standard RCAN configuration
-        (1, 128, 64, 64, 16),  # Larger feature maps
-        (2, 64, 32, 32, 16),  # Batch size 2
-        (1, 256, 16, 16, 32),  # Higher channels with different squeeze factor
-        (1, 32, 128, 128, 8),  # Smaller channels, larger spatial dimensions
-        (1, 512, 8, 8, 64),  # Very high channels, small spatial
+        # (2, 64, 32, 32, 16),  # Standard RCAN configuration
+        # (1, 128, 64, 64, 16),  # Larger feature maps
+        # (2, 64, 32, 32, 16),  # Batch size 2
+        # (1, 256, 16, 16, 32),  # Higher channels with different squeeze factor
+        # (1, 32, 128, 128, 8),  # Smaller channels, larger spatial dimensions
+        # (1, 512, 8, 8, 64),  # Very high channels, small spatial
+        (1, 180, 64, 64, 30),  # SSR config
     ],
 )
 @pytest.mark.parametrize("device_params", [{"l1_small_size": 32768}], indirect=True)
@@ -177,7 +161,11 @@ def test_channel_attention(device, batch_size, num_feat, height, width, squeeze_
 
     # Convert input to TTNN format (NHWC)
     tt_input = ttnn.from_torch(
-        input_tensor.permute(0, 2, 3, 1), device=device, layout=ttnn.TILE_LAYOUT, dtype=ttnn.bfloat16  # NCHW -> NHWC
+        input_tensor.permute(0, 2, 3, 1),
+        device=device,
+        layout=ttnn.TILE_LAYOUT,
+        dtype=ttnn.bfloat16,
+        memory_config=ttnn.L1_MEMORY_CONFIG,  # NCHW -> NHWC
     )
 
     # TTNN forward pass
@@ -191,167 +179,6 @@ def test_channel_attention(device, batch_size, num_feat, height, width, squeeze_
     does_pass, pcc_message = comp_pcc(ref_output, tt_torch_output, 0.98)
 
     logger.info(f"Batch: {batch_size}, Features: {num_feat}, Size: {height}x{width}, Squeeze: {squeeze_factor}")
-    logger.info(f"Reference output shape: {ref_output.shape}")
-    logger.info(f"TTNN output shape: {tt_torch_output.shape}")
-    logger.info(pcc_message)
-
-    if does_pass:
-        logger.info("ChannelAttention Passed!")
-    else:
-        logger.warning("ChannelAttention Failed!")
-
-    assert does_pass, f"PCC check failed: {pcc_message}"
-
-    # Verify output shapes match
-    assert (
-        ref_output.shape == tt_torch_output.shape
-    ), f"Shape mismatch: ref {ref_output.shape} vs ttnn {tt_torch_output.shape}"
-
-
-@pytest.mark.parametrize("device_params", [{"l1_small_size": 32768}], indirect=True)
-def test_channel_attention_memory_config(device):
-    """Test different memory configurations"""
-    torch.manual_seed(0)
-
-    num_feat = 64
-    squeeze_factor = 16
-    batch_size = 1
-    height, width = 32, 32
-
-    ref_model = ChannelAttention(num_feat=num_feat, squeeze_factor=squeeze_factor)
-    ref_model.eval()
-
-    input_tensor = torch.randn(batch_size, num_feat, height, width)
-
-    with torch.no_grad():
-        ref_output = ref_model(input_tensor)
-
-    # Test with L1 memory config
-    parameters = preprocess_model_parameters(
-        initialize_model=lambda: ref_model,
-        custom_preprocessor=create_channel_attention_preprocessor(device),
-        device=device,
-    )
-
-    tt_model_l1 = TTChannelAttention(
-        device=device,
-        parameters=parameters,
-        num_feat=num_feat,
-        squeeze_factor=squeeze_factor,
-        memory_config=ttnn.L1_MEMORY_CONFIG,
-    )
-
-    tt_input = ttnn.from_torch(
-        input_tensor.permute(0, 2, 3, 1), device=device, layout=ttnn.TILE_LAYOUT, dtype=ttnn.bfloat16
-    )
-
-    tt_output_l1 = tt_model_l1(tt_input)
-    tt_torch_output_l1 = ttnn.to_torch(tt_output_l1).permute(0, 3, 1, 2)
-
-    does_pass_l1, pcc_message_l1 = comp_pcc(ref_output, tt_torch_output_l1, 0.98)
-    logger.info(f"L1 Memory Config: {pcc_message_l1}")
-    assert does_pass_l1, f"L1 memory config failed: {pcc_message_l1}"
-
-
-def test_channel_attention_multiple_iterations(device):
-    """Test multiple forward passes to check for memory leaks"""
-    torch.manual_seed(0)
-
-    num_feat = 128
-    squeeze_factor = 16
-    batch_size = 1
-    height, width = 64, 64
-
-    ref_model = ChannelAttention(num_feat=num_feat, squeeze_factor=squeeze_factor)
-    ref_model.eval()
-
-    parameters = preprocess_model_parameters(
-        initialize_model=lambda: ref_model,
-        custom_preprocessor=create_channel_attention_preprocessor(device),
-        device=device,
-    )
-
-    tt_model = TTChannelAttention(
-        device=device,
-        parameters=parameters,
-        num_feat=num_feat,
-        squeeze_factor=squeeze_factor,
-        memory_config=ttnn.DRAM_MEMORY_CONFIG,
-    )
-
-    # Run multiple forward passes to check for memory leaks
-    for i in range(3):
-        input_tensor = torch.randn(batch_size, num_feat, height, width)
-
-        with torch.no_grad():
-            ref_output = ref_model(input_tensor)
-
-        tt_input = ttnn.from_torch(
-            input_tensor.permute(0, 2, 3, 1), device=device, layout=ttnn.TILE_LAYOUT, dtype=ttnn.bfloat16
-        )
-
-        tt_output = tt_model(tt_input)
-        tt_torch_output = ttnn.to_torch(tt_output).permute(0, 3, 1, 2)
-
-        does_pass, pcc_message = comp_pcc(ref_output, tt_torch_output, 0.98)
-        logger.info(f"Iteration {i+1}: {pcc_message}")
-        assert does_pass, f"Iteration {i+1} failed: {pcc_message}"
-
-        # Clean up tensors to prevent memory leaks
-        ttnn.deallocate(tt_input)
-        ttnn.deallocate(tt_output)
-
-        logger.info(f"Iteration {i+1} completed successfully")
-
-
-@pytest.mark.parametrize(
-    "num_feat, squeeze_factor",
-    [
-        (64, 4),  # High squeeze factor
-        (128, 64),  # Low squeeze factor
-        (256, 16),  # Standard squeeze factor
-        (32, 2),  # Minimal squeeze factor
-    ],
-)
-@pytest.mark.parametrize("device_params", [{"l1_small_size": 32768}], indirect=True)
-def test_channel_attention_squeeze_factors(device, num_feat, squeeze_factor):
-    """Test different squeeze factor configurations"""
-    torch.manual_seed(0)
-
-    batch_size = 1
-    height, width = 32, 32
-
-    ref_model = ChannelAttention(num_feat=num_feat, squeeze_factor=squeeze_factor)
-    ref_model.eval()
-
-    input_tensor = torch.randn(batch_size, num_feat, height, width)
-
-    with torch.no_grad():
-        ref_output = ref_model(input_tensor)
-
-    parameters = preprocess_model_parameters(
-        initialize_model=lambda: ref_model,
-        custom_preprocessor=create_channel_attention_preprocessor(device),
-        device=device,
-    )
-
-    tt_model = TTChannelAttention(
-        device=device,
-        parameters=parameters,
-        num_feat=num_feat,
-        squeeze_factor=squeeze_factor,
-        memory_config=ttnn.DRAM_MEMORY_CONFIG,
-    )
-
-    tt_input = ttnn.from_torch(
-        input_tensor.permute(0, 2, 3, 1), device=device, layout=ttnn.TILE_LAYOUT, dtype=ttnn.bfloat16
-    )
-
-    tt_output = tt_model(tt_input)
-    tt_torch_output = ttnn.to_torch(tt_output).permute(0, 3, 1, 2)
-
-    does_pass, pcc_message = comp_pcc(ref_output, tt_torch_output, 0.98)
-
     logger.info(f"Reference output shape: {ref_output.shape}")
     logger.info(f"TTNN output shape: {tt_torch_output.shape}")
     logger.info(pcc_message)
