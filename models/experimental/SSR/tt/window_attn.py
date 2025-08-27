@@ -3,6 +3,8 @@
 
 import ttnn
 import torch.nn as nn
+import torch
+from models.demos.deepseek_v3.utils.config_helpers import matmul_config
 
 
 class TTWindowAttention(nn.Module):
@@ -25,6 +27,37 @@ class TTWindowAttention(nn.Module):
         self.head_dim = dim // num_heads
         self.scale = self.head_dim**-0.5
 
+    def _compute_attention_mask(self):
+        """Compute attention mask for shifted window attention"""
+        H, W = self.input_resolution
+
+        # Create mask on CPU first
+        img_mask = torch.zeros((1, H, W, 1))
+        h_slices = (
+            slice(0, -self.window_size),
+            slice(-self.window_size, -self.shift_size),
+            slice(-self.shift_size, None),
+        )
+        w_slices = (
+            slice(0, -self.window_size),
+            slice(-self.window_size, -self.shift_size),
+            slice(-self.shift_size, None),
+        )
+        cnt = 0
+        for h in h_slices:
+            for w in w_slices:
+                img_mask[:, h, w, :] = cnt
+                cnt += 1
+
+        # Partition into windows
+        mask_windows, _ = self._window_partition_padding(img_mask, self.window_size)
+        mask_windows = mask_windows.view(-1, self.window_size * self.window_size)
+        attn_mask = mask_windows.unsqueeze(1) - mask_windows.unsqueeze(2)
+        attn_mask = attn_mask.masked_fill(attn_mask != 0, float(-100.0)).masked_fill(attn_mask == 0, float(0.0))
+
+        # Convert to TTNN tensor
+        return ttnn.from_torch(attn_mask, device=self.device, layout=ttnn.TILE_LAYOUT, memory_config=self.memory_config)
+
     def forward(self, input_tensor, mask=None):
         """
         Args:
@@ -39,7 +72,7 @@ class TTWindowAttention(nn.Module):
         qkv_weight = self.parameters["qkv"]["weight"]
         qkv_bias = self.parameters["qkv"]["bias"]
 
-        input_tensor = ttnn.to_layout(input_tensor, ttnn.TILE_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        program_config = matmul_config(input_tensor.shape[-2], input_tensor.shape[-1], qkv_bias.shape[-1], (8, 8))
         qkv = ttnn.linear(
             input_tensor,
             qkv_weight,
@@ -48,13 +81,13 @@ class TTWindowAttention(nn.Module):
                 math_fidelity=ttnn.MathFidelity.LoFi,
             ),
             memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            program_config=program_config,
         )
         ttnn.deallocate(input_tensor)
 
         # Reshape and permute QKV
-        qkv = ttnn.to_layout(qkv, layout=ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
-        qkv = ttnn.reshape(qkv, (B_, N, 3, self.num_heads, C // self.num_heads))
-        qkv = ttnn.permute(qkv, (2, 0, 3, 1, 4), memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        qkv = ttnn.reshape(qkv, (B_, N, 3, self.num_heads, C // self.num_heads), memory_config=ttnn.L1_MEMORY_CONFIG)
+        qkv = ttnn.permute(qkv, (2, 0, 3, 1, 4), memory_config=ttnn.L1_MEMORY_CONFIG)
 
         # Extract Q, K, V
         q = qkv[0:1, :, :, :, :]
@@ -66,23 +99,18 @@ class TTWindowAttention(nn.Module):
         k = ttnn.squeeze(k, 0)
         v = ttnn.squeeze(v, 0)
 
-        # Convert to tile layout for computation
-        q = ttnn.to_layout(q, ttnn.TILE_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
-        k = ttnn.to_layout(k, ttnn.TILE_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
-        v = ttnn.to_layout(v, ttnn.TILE_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
-
         # Apply scaling
         q = q * self.scale
 
         # Compute attention scores
-        k = ttnn.permute(k, (0, 1, 3, 2), memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        k = ttnn.permute(k, (0, 1, 3, 2), memory_config=ttnn.L1_MEMORY_CONFIG)
         attn = ttnn.matmul(
             q,
             k,
             compute_kernel_config=ttnn.WormholeComputeKernelConfig(
                 math_fidelity=ttnn.MathFidelity.LoFi,
             ),
-            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            memory_config=ttnn.L1_MEMORY_CONFIG,
         )
 
         # Clean up intermediate tensors
@@ -91,21 +119,17 @@ class TTWindowAttention(nn.Module):
         ttnn.deallocate(k)
 
         # Add relative position bias
-        attn = ttnn.add(attn, relative_position_bias, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        attn = ttnn.add(attn, relative_position_bias, memory_config=ttnn.L1_MEMORY_CONFIG)
 
         # Apply mask if provided
         if mask is not None:
             nW = mask.shape[0]
-            attn = ttnn.to_layout(attn, layout=ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
-            attn = ttnn.reshape(attn, (B_ // nW, nW, self.num_heads, N, N))
-            attn = ttnn.to_layout(attn, layout=ttnn.TILE_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            attn = ttnn.reshape(attn, (B_ // nW, nW, self.num_heads, N, N), memory_config=ttnn.L1_MEMORY_CONFIG)
             attn = attn + ttnn.unsqueeze(ttnn.unsqueeze(mask, 1), 0)
-            attn = ttnn.to_layout(attn, layout=ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
-            attn = ttnn.reshape(attn, (-1, self.num_heads, N, N))
-            attn = ttnn.to_layout(attn, layout=ttnn.TILE_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            attn = ttnn.reshape(attn, (-1, self.num_heads, N, N), memory_config=ttnn.L1_MEMORY_CONFIG)
 
         # Apply softmax
-        attn = ttnn.softmax(attn, dim=-1, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        attn = ttnn.softmax(attn, dim=-1, memory_config=ttnn.L1_MEMORY_CONFIG)
 
         # Compute final output
         output_tensor = ttnn.matmul(
@@ -114,7 +138,7 @@ class TTWindowAttention(nn.Module):
             compute_kernel_config=ttnn.WormholeComputeKernelConfig(
                 math_fidelity=ttnn.MathFidelity.LoFi,
             ),
-            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            memory_config=ttnn.L1_MEMORY_CONFIG,
         )
 
         # Clean up attention and value tensors
@@ -123,11 +147,7 @@ class TTWindowAttention(nn.Module):
 
         # Reshape output
         output_tensor = ttnn.permute(output_tensor, (0, 2, 1, 3), memory_config=ttnn.DRAM_MEMORY_CONFIG)
-        output_tensor = ttnn.to_layout(
-            output_tensor, layout=ttnn.ROW_MAJOR_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG
-        )
-        output_tensor = ttnn.reshape(output_tensor, (B_, N, C))
-        output_tensor = ttnn.to_layout(output_tensor, layout=ttnn.TILE_LAYOUT, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        output_tensor = ttnn.reshape(output_tensor, (B_, N, C), memory_config=ttnn.L1_MEMORY_CONFIG)
 
         # Apply projection
         proj_weight = self.parameters["proj"]["weight"]
@@ -140,7 +160,7 @@ class TTWindowAttention(nn.Module):
             compute_kernel_config=ttnn.WormholeComputeKernelConfig(
                 math_fidelity=ttnn.MathFidelity.LoFi,
             ),
-            memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            memory_config=ttnn.L1_MEMORY_CONFIG,
         )
 
         return output_tensor
