@@ -72,7 +72,7 @@ class TTWindowAttention(nn.Module):
         qkv_weight = self.parameters["qkv"]["weight"]
         qkv_bias = self.parameters["qkv"]["bias"]
 
-        program_config = matmul_config(input_tensor.shape[-2], input_tensor.shape[-1], qkv_bias.shape[-1], (8, 8))
+        qkv_program_config = matmul_config(input_tensor.shape[-2], input_tensor.shape[-1], qkv_bias.shape[-1], (8, 8))
         qkv = ttnn.linear(
             input_tensor,
             qkv_weight,
@@ -80,8 +80,8 @@ class TTWindowAttention(nn.Module):
             compute_kernel_config=ttnn.WormholeComputeKernelConfig(
                 math_fidelity=ttnn.MathFidelity.LoFi,
             ),
-            memory_config=ttnn.DRAM_MEMORY_CONFIG,
-            program_config=program_config,
+            memory_config=ttnn.L1_MEMORY_CONFIG if B_ * N * C < 1_100_000 else ttnn.DRAM_MEMORY_CONFIG,
+            program_config=qkv_program_config,
         )
         ttnn.deallocate(input_tensor)
 
@@ -114,7 +114,6 @@ class TTWindowAttention(nn.Module):
         )
 
         # Clean up intermediate tensors
-        # ttnn.deallocate(qkv)
         ttnn.deallocate(q)
         ttnn.deallocate(k)
 
@@ -146,13 +145,20 @@ class TTWindowAttention(nn.Module):
         ttnn.deallocate(attn)
 
         # Reshape output
-        output_tensor = ttnn.permute(output_tensor, (0, 2, 1, 3), memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        output_tensor = ttnn.permute(
+            output_tensor,
+            (0, 2, 1, 3),
+            memory_config=ttnn.L1_MEMORY_CONFIG if B_ * N * C < 5_000_000 else ttnn.DRAM_MEMORY_CONFIG,
+        )
         output_tensor = ttnn.reshape(output_tensor, (B_, N, C), memory_config=ttnn.L1_MEMORY_CONFIG)
 
         # Apply projection
         proj_weight = self.parameters["proj"]["weight"]
         proj_bias = self.parameters["proj"]["bias"]
 
+        output_matmul_program_config = matmul_config(
+            output_tensor.shape[-2], output_tensor.shape[-1], proj_bias.shape[-1], (8, 8)
+        )
         output_tensor = ttnn.linear(
             output_tensor,
             proj_weight,
@@ -161,6 +167,7 @@ class TTWindowAttention(nn.Module):
                 math_fidelity=ttnn.MathFidelity.LoFi,
             ),
             memory_config=ttnn.L1_MEMORY_CONFIG,
+            program_config=output_matmul_program_config,
         )
 
         return output_tensor
