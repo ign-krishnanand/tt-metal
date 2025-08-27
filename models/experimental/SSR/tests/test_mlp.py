@@ -1,6 +1,5 @@
 import torch
 import pytest
-import math
 
 import ttnn
 
@@ -36,29 +35,46 @@ def create_mlp_preprocessor(device):
     return custom_preprocessor
 
 
-@pytest.mark.parametrize("image_size, patch_size, token_size, input_shape", ((256, 2, 4, (1, 16, 3072)),))
-def test_mlp(image_size, patch_size, token_size, input_shape):
+@pytest.mark.parametrize(
+    "in_features, hidden_features, out_features, input_shape",
+    (
+        (3072, 3072, 3072, (3, 16, 3072)),  # TTTileSelection -> fea_mlp3
+        (1536, 3072, 3072, (3, 64, 1536)),  # TTTileSelection -> fea_mlp2
+        (768, 3072, 3072, (3, 256, 768)),  # TTTileSelection -> fea_mlp1     8898 us
+        (3072, 96, 96, (3, 16, 3072)),  # TTTileSelection -> mlp3, mlp2
+        (3072, 96, 96, (3, 256, 3072)),  # TTTileSelection -> mlp1
+        (96, 384, 96, (3, 16384, 96)),  # TTSwinTransformerBlock[0], TTSwinTransformerBlock[1] -> mlp
+        (192, 768, 192, (3, 4096, 192)),  # TTSwinTransformerBlock[2], TTSwinTransformerBlock[3] -> mlp
+        (384, 1536, 384, (3, 1024, 384)),  # TTSwinTransformerBlock[4], TTSwinTransformerBlock[5] -> mlp
+        (768, 3072, 768, (3, 256, 768)),  # TTSwinTransformerBlock[6], TTSwinTransformerBlock[7] -> mlp
+        (1536, 6144, 1536, (3, 64, 1536)),  # TTSwinTransformerBlock[6], TTSwinTransformerBlock[7] -> mlp
+    ),
+)
+def test_mlp(device, in_features, hidden_features, out_features, input_shape):
     x = torch.randn(input_shape)
 
-    num_layers = int(math.log2((image_size // patch_size) // token_size))
     ref_layer = Mlp(
-        in_features=96 * (2**num_layers),
-        hidden_features=96,
-        out_features=96,
+        in_features=in_features,
+        hidden_features=hidden_features,
+        out_features=out_features,
     )
 
     ref_output = ref_layer(x)
-
-    device = ttnn.open_device(device_id=0)
 
     parameters = preprocess_model_parameters(
         initialize_model=lambda: ref_layer, custom_preprocessor=create_mlp_preprocessor(device), device=device
     )
 
     tt_layer = TTMlp(
-        device, None, in_features=96 * (2**num_layers), hidden_features=96, out_features=96, parameters=parameters
+        device,
+        None,
+        in_features=in_features,
+        hidden_features=hidden_features,
+        out_features=out_features,
+        parameters=parameters,
     )
-    tt_input = ttnn.from_torch(x, device=device, layout=ttnn.TILE_LAYOUT)
+    tt_input = ttnn.from_torch(x, device=device, layout=ttnn.TILE_LAYOUT, dtype=ttnn.bfloat16)
+    tt_input = ttnn.to_memory_config(tt_input, memory_config=ttnn.L1_MEMORY_CONFIG)
     tt_output = tt_layer(tt_input)
     tt_torch_output = tt2torch_tensor(tt_output)
 
@@ -67,10 +83,8 @@ def test_mlp(image_size, patch_size, token_size, input_shape):
     logger.info(pcc_message)
 
     if does_pass:
-        logger.info("SwinLayer Passed!")
+        logger.info("SSR MLP Passed!")
     else:
-        logger.warning("SwinLayer Failed!")
-
-    ttnn.close_device(device)
+        logger.warning("SSR MLP Failed!")
 
     assert does_pass
