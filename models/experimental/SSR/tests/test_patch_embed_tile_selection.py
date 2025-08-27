@@ -40,9 +40,6 @@ class PatchEmbed(nn.Module):
             self.norm = None
 
     def forward(self, x):
-        import pdb
-
-        pdb.set_trace()
         x = x.flatten(2).transpose(1, 2)  # b Ph*Pw c
         if self.norm is not None:
             x = self.norm(x)

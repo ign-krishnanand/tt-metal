@@ -40,27 +40,24 @@ def create_mlp_preprocessor(device):
     "in_features, hidden_features, out_features, input_shape",
     [
         # SwinTB tests
-        (96,   384,  None, (1, 16384, 96)),
-        (192,  768,  None, (1, 4096, 192)),
-        (384,  1536, None, (1, 1024, 384)),
-        (768,  3072, None, (1, 256, 768)),
+        (96, 384, None, (1, 16384, 96)),
+        (192, 768, None, (1, 4096, 192)),
+        (384, 1536, None, (1, 1024, 384)),
+        (768, 3072, None, (1, 256, 768)),
         (1536, 6144, None, (1, 64, 1536)),
-
         # fea_mlp tests
-        (3072, 3072, 3072, (1, 16, 3072)),   # fea_mlp3
-        (1536, 3072, 3072, (1, 64, 1536)),   # fea_mlp2
-        (768,  3072, 3072, (1, 256, 768)),   # fea_mlp1
-
+        (3072, 3072, 3072, (1, 16, 3072)),  # fea_mlp3
+        (1536, 3072, 3072, (1, 64, 1536)),  # fea_mlp2
+        (768, 3072, 3072, (1, 256, 768)),  # fea_mlp1
         # mlp tests
-        (3072, 96, 96, (1, 16, 3072)),       # mlp3
-        (3072, 96, 96, (1, 64, 3072)),       # mlp2
-        (3072, 96, 96, (1, 256, 3072)),      # mlp1
-
+        (3072, 96, 96, (1, 16, 3072)),  # mlp3
+        (3072, 96, 96, (1, 64, 3072)),  # mlp2
+        (3072, 96, 96, (1, 256, 3072)),  # mlp1
         # HAB, OCAB test
-        (180,  360, None, (1, 4096, 180)),
-    ]
+        (180, 360, None, (1, 4096, 180)),
+    ],
 )
-def test_mlp(in_features, hidden_features, out_features, input_shape):    
+def test_mlp(in_features, hidden_features, out_features, input_shape):
     x = torch.randn(input_shape)
 
     image_size, patch_size, token_size = 256, 2, 4
@@ -69,7 +66,7 @@ def test_mlp(in_features, hidden_features, out_features, input_shape):
         in_features=in_features,
         hidden_features=hidden_features,
         out_features=out_features,
-    )    
+    )
 
     ref_output = ref_layer(x)
 
@@ -80,7 +77,12 @@ def test_mlp(in_features, hidden_features, out_features, input_shape):
     )
 
     tt_layer = TTMlp(
-        device, None, in_features=96 * (2**num_layers), hidden_features=96, out_features=96, parameters=parameters
+        device,
+        None,
+        in_features=in_features,
+        hidden_features=hidden_features,
+        out_features=out_features,
+        parameters=parameters,
     )
     tt_input = ttnn.from_torch(x, device=device, layout=ttnn.TILE_LAYOUT)
     tt_output = tt_layer(tt_input)
