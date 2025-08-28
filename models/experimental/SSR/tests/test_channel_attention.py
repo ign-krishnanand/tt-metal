@@ -126,7 +126,9 @@ def create_channel_attention_preprocessor(device):
         # (1, 256, 16, 16, 32),  # Higher channels with different squeeze factor
         # (1, 32, 128, 128, 8),  # Smaller channels, larger spatial dimensions
         # (1, 512, 8, 8, 64),  # Very high channels, small spatial
-        (1, 180, 64, 64, 30),  # SSR config
+        # (3, 180, 64, 64, 30),  # SSR config
+        # (5, 180, 64, 64, 30),  # SSR config
+        (10, 180, 64, 64, 30),  # SSR config
     ],
 )
 @pytest.mark.parametrize("device_params", [{"l1_small_size": 32768}], indirect=True)
