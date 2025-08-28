@@ -3,91 +3,7 @@ from models.common.lightweightmodule import LightweightModule
 
 from models.experimental.SSR.tt.CAB import TTCAB
 from models.experimental.SSR.tt.mlp import TTMlp
-
-
-class TTWindowAttention(LightweightModule):
-    def __init__(self, device, parameters, dim, window_size, num_heads, memory_config=None):
-        super().__init__()
-        self.device = device
-        self.memory_config = memory_config or ttnn.DRAM_MEMORY_CONFIG
-        self.dim = dim
-        self.window_size = window_size
-        self.num_heads = num_heads
-        self.head_dim = dim // num_heads
-
-        # Extract preprocessed parameters
-        self.qkv_weight = parameters["qkv"]["weight"]
-        self.qkv_bias = parameters["qkv"]["bias"] if "bias" in parameters["qkv"] else None
-        self.proj_weight = parameters["proj"]["weight"]
-        self.proj_bias = parameters["proj"]["bias"] if "bias" in parameters["proj"] else None
-        self.relative_position_bias_table = parameters["relative_position_bias_table"]
-
-        # Scale factor
-        self.scale = self.head_dim**-0.5
-
-    def forward(self, x, rpi, mask=None):
-        b_, n, c = x.shape
-
-        # QKV projection
-        qkv = ttnn.linear(x, self.qkv_weight, bias=self.qkv_bias, memory_config=self.memory_config)
-
-        # Reshape for multi-head attention: [b_, n, 3, num_heads, head_dim]
-        qkv = ttnn.reshape(qkv, [b_, n, 3, self.num_heads, self.head_dim])
-        qkv = ttnn.permute(qkv, [2, 0, 3, 1, 4])  # [3, b_, num_heads, n, head_dim]
-
-        # Split Q, K, V
-        q = ttnn.slice(qkv, [0, 0, 0, 0, 0], [1, b_, self.num_heads, n, self.head_dim])
-        k = ttnn.slice(qkv, [1, 0, 0, 0, 0], [2, b_, self.num_heads, n, self.head_dim])
-        v = ttnn.slice(qkv, [2, 0, 0, 0, 0], [3, b_, self.num_heads, n, self.head_dim])
-
-        # Remove the first dimension
-        q = ttnn.squeeze(q, 0)
-        k = ttnn.squeeze(k, 0)
-        v = ttnn.squeeze(v, 0)
-
-        # Scale Q
-        q = ttnn.multiply(q, self.scale)
-
-        # Attention computation: Q @ K^T
-        k_transposed = ttnn.transpose(k, -2, -1)
-        attn = ttnn.matmul(q, k_transposed)
-
-        # Add relative position bias
-        # Extract relative position bias from table using rpi indices
-        window_area = self.window_size[0] * self.window_size[1]
-        rpi_flat = ttnn.reshape(rpi, [-1])
-        relative_position_bias = ttnn.embedding(rpi_flat, self.relative_position_bias_table)
-        relative_position_bias = ttnn.reshape(relative_position_bias, [window_area, window_area, self.num_heads])
-        relative_position_bias = ttnn.permute(
-            relative_position_bias, [2, 0, 1]
-        )  # [num_heads, window_area, window_area]
-
-        # Add bias to attention
-        relative_position_bias = ttnn.unsqueeze(relative_position_bias, 0)  # [1, num_heads, window_area, window_area]
-        attn = ttnn.add(attn, relative_position_bias)
-
-        # Apply mask if provided
-        if mask is not None:
-            nw = mask.shape[0]
-            attn = ttnn.reshape(attn, [b_ // nw, nw, self.num_heads, n, n])
-            mask_expanded = ttnn.unsqueeze(ttnn.unsqueeze(mask, 1), 0)
-            attn = ttnn.add(attn, mask_expanded)
-            attn = ttnn.reshape(attn, [-1, self.num_heads, n, n])
-
-        # Softmax
-        attn = ttnn.softmax(attn, dim=-1)
-
-        # Apply attention to values
-        x = ttnn.matmul(attn, v)  # [b_, num_heads, n, head_dim]
-
-        # Transpose and reshape back
-        x = ttnn.transpose(x, 1, 2)  # [b_, n, num_heads, head_dim]
-        x = ttnn.reshape(x, [b_, n, c])
-
-        # Output projection
-        x = ttnn.linear(x, self.proj_weight, bias=self.proj_bias, memory_config=self.memory_config)
-
-        return x
+from models.experimental.SSR.tt.window_attn_tr import TTWindowAttentionTR
 
 
 class TTHAB(LightweightModule):
@@ -126,7 +42,7 @@ class TTHAB(LightweightModule):
         self.conv_scale = parameters.get("conv_scale", 0.01)
 
         # Initialize sub-modules
-        self.attn = TTWindowAttention(
+        self.attn = TTWindowAttentionTR(
             device=device,
             parameters=parameters["attn"],
             dim=dim,

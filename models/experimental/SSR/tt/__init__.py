@@ -6,6 +6,7 @@ from .patch_merging import TTPatchMerging
 from .basic_block import TTBasicLayer
 from .mask_token_inference import TTMaskTokenInference
 from .patch_unembed import TTPatchUnEmbed
+from .window_attn_tr import TTWindowAttentionTR
 
 __all__ = [
     "TTMlp",
@@ -16,4 +17,5 @@ __all__ = [
     "TTBasicLayer",
     "TTMaskTokenInference",
     "TTPatchUnEmbed",
+    "TTWindowAttentionTR",
 ]
