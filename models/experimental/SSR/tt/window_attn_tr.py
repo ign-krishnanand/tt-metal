@@ -44,14 +44,25 @@ class TTWindowAttentionTR(LightweightModule):
             core_grid=ttnn.CoreGrid(y=7, x=7),
         )
         qkv_torch = ttnn.to_torch(qkv)
-        head_size = 180
-        padded_head_size = 192
-        input_tensor_heads = torch.split(qkv_torch, head_size, dim=-1)
-        input_tensor_heads = [
-            torch.nn.functional.pad(head, (0, padded_head_size - head_size), "constant", 0)
-            for head in input_tensor_heads
-        ]
+        # qkv_torch=torch.load("torch_input_tensor.pt")
+        q_ref = torch.load("query_tensor.pt")
+        k_ref = torch.load("key_tensor.pt")
+        v_ref = torch.load("value_tensor.pt")
+        # import pdb; pdb.set_trace()
+        head_size = 30
+        padded_head_size = 32
+        # assert_with_pcc(torch.load("input_tensor_heads_ref.pt"), qkv_torch, 0.999)
+        input_tensor_heads = torch.split(qkv_torch, 30, dim=-1)
+        # input_tensor_heads = torch.split(qkv_torch, head_size, dim=-1)
+
+        # input_tensor_heads = [
+        #     torch.nn.functional.pad(head, (0, padded_head_size - head_size), "constant", 0)
+        #     for head in input_tensor_heads
+        # ]
+        input_tensor_heads = [torch.nn.functional.pad(head, (0, 2), "constant", 0) for head in input_tensor_heads]
         qkv = torch.cat(input_tensor_heads, dim=-1)
+        padded_input_tensor = torch.load("input_tensor_torch_padded.pt")
+        # assert_with_pcc(padded_input_tensor, qkv, 0.999)
         qkv = ttnn.from_torch(
             qkv,
             device=self.device,
@@ -60,25 +71,6 @@ class TTWindowAttentionTR(LightweightModule):
             layout=ttnn.TILE_LAYOUT,
         )
         ttnn.deallocate(x)
-        # unoptimised method - works for 180 dim
-        # qkv = ttnn.reshape(
-        #     qkv,
-        #     [b_, n, 3, self.num_heads, self.head_dim],
-        #     memory_config=ttnn.L1_MEMORY_CONFIG if b_ * n * c < 1_100_000 else ttnn.DRAM_MEMORY_CONFIG,
-        # )
-        # qkv = ttnn.permute(qkv, [2, 0, 3, 1, 4])  # [3, b_, num_heads, n, head_dim]
-
-        # # Split Q, K, V
-        # q = ttnn.slice(qkv, [0, 0, 0, 0, 0], [1, b_, self.num_heads, n, self.head_dim])
-        # k = ttnn.slice(qkv, [1, 0, 0, 0, 0], [2, b_, self.num_heads, n, self.head_dim])
-        # v = ttnn.slice(qkv, [2, 0, 0, 0, 0], [3, b_, self.num_heads, n, self.head_dim])
-
-        # -------------------------------------------------------------
-
-        # optimised method - Works for 192 dim
-        # padding = [(0, 0), (0, 0), (0, 576 - 540)]
-        # qkv = ttnn.pad(qkv, padding, 0.0)
-        # # import pdb; pdb.set_trace()
 
         (
             q,
@@ -87,12 +79,13 @@ class TTWindowAttentionTR(LightweightModule):
         ) = ttnn.transformer.split_query_key_value_and_split_heads(
             qkv, memory_config=ttnn.L1_MEMORY_CONFIG, num_heads=self.num_heads
         )
-        import pdb
 
-        pdb.set_trace()
         q = ttnn.to_torch(q)[..., :30]
-        k = ttnn.to_torch(v)[..., :30, :]
+        k = ttnn.to_torch(k)[..., :30, :]
         v = ttnn.to_torch(v)[..., :30]
+        # assert_with_pcc(q_ref, q, 0.999)
+        # assert_with_pcc(k_ref, k, 0.999)
+        # assert_with_pcc(v_ref, v, 0.999)
         # Deallocate the original qkv tensor
         return q, k, v
         ttnn.deallocate(qkv)

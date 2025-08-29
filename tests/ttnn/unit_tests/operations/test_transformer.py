@@ -398,11 +398,12 @@ def test_split_query_key_value_and_split_heads_when_head_size_is_not_a_multiple_
 
     torch.manual_seed(0)
 
-    batch_size = 2
-    sequence_size = 1024
-    num_heads = 8
-    head_size = 80
-    padded_head_size = 96  # Head size padded to tile size
+    batch_size = 1
+    # sequence_size = 1024
+    sequence_size = 256
+    num_heads = 6
+    head_size = 30
+    padded_head_size = 32  # Head size padded to tile size
     input_dtype = ttnn.bfloat16
     input_memory_config = ttnn.DRAM_MEMORY_CONFIG
 
@@ -417,7 +418,12 @@ def test_split_query_key_value_and_split_heads_when_head_size_is_not_a_multiple_
         torch_input_tensor,
         num_heads=num_heads,
     )
+    import numpy as np
 
+    # torch.save("torch_input_tensor.pt", torch_input_tensor)
+    # The error is because the arguments to torch.save are in the wrong order.
+    # The correct order is torch.save(obj, f), where obj is the tensor and f is the filename.
+    torch.save(torch_input_tensor, "torch_input_tensor.pt")
     input_tensor = ttnn.from_torch(
         torch_input_tensor,
         device=device,
@@ -455,9 +461,14 @@ def test_split_query_key_value_and_split_heads_when_head_size_is_not_a_multiple_
     )
 
     # Remove the padding
+    print("SAVING....")
     query_tensor = ttnn.to_torch(query_tensor)[..., :head_size]
     key_tensor = ttnn.to_torch(key_tensor)[..., :head_size, :]
     value_tensor = ttnn.to_torch(value_tensor)[..., :head_size]
+
+    torch.save(query_tensor, "query_tensor.pt")
+    torch.save(key_tensor, "key_tensor.pt")
+    torch.save(value_tensor, "value_tensor.pt")
 
     assert_with_pcc(torch_query_tensor, query_tensor, 0.999)
     assert_with_pcc(torch_key_tensor, key_tensor, 0.999)
