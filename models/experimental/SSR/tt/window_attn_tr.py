@@ -15,6 +15,7 @@ class TTWindowAttentionTR(LightweightModule):
 
         # Extract preprocessed parameters
         self.qkv_weight = parameters["qkv"]["weight"]
+        # import pdb; pdb.set_trace()
         self.qkv_bias = parameters["qkv"]["bias"] if "bias" in parameters["qkv"] else None
         self.proj_weight = parameters["proj"]["weight"]
         self.proj_bias = parameters["proj"]["bias"] if "bias" in parameters["proj"] else None
@@ -31,6 +32,7 @@ class TTWindowAttentionTR(LightweightModule):
         # ttnn.deallocate(x)
 
         # x = ttnn.to_layout(x, ttnn.TILE_LAYOUT)
+        # import pdb; pdb.set_trace()
 
         qkv = ttnn.linear(
             x,
@@ -60,6 +62,7 @@ class TTWindowAttentionTR(LightweightModule):
         # padding = [(0, 0), (0, 0), (0, 576 - 540)]
         # qkv = ttnn.pad(qkv, padding, 0.0)
         # # import pdb; pdb.set_trace()
+
         (
             q,
             k,
@@ -80,6 +83,7 @@ class TTWindowAttentionTR(LightweightModule):
         q = ttnn.squeeze(q, 0)
         k = ttnn.squeeze(k, 0)
         v = ttnn.squeeze(v, 0)
+        # import pdb; pdb.set_trace()
 
         # Scale Q
         q = ttnn.multiply(q, self.scale, memory_config=self.memory_config)
@@ -143,8 +147,9 @@ class TTWindowAttentionTR(LightweightModule):
         # Transpose and reshape back
         x = ttnn.transpose(x, 1, 2, memory_config=self.memory_config)  # [b_, n, num_heads, head_dim]
         # import pdb; pdb.set_trace()
-        x = ttnn.reshape(x, [b_, n, c], memory_config=self.memory_config)
-        # x = ttnn.reshape(x, [b_, n, 192], memory_config=self.memory_config)
+        # x = ttnn.reshape(x, [b_, n, c], memory_config=self.memory_config)
+        x = ttnn.reshape(x, [b_, n, 192], memory_config=self.memory_config)
+        x = ttnn.slice(x, (0, 0, 0), (b_, n, 180))
         # import pdb; pdb.set_trace()
         # x = x[:, :, :180]
         # Output projection

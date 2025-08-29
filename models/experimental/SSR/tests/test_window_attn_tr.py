@@ -15,11 +15,14 @@ from models.utility_functions import comp_pcc
 def create_window_attention_preprocessor(device):
     def custom_preprocessor(torch_model, name, ttnn_module_args):
         params = {}
+        # import pdb; pdb.set_trace()
+        padded_qkv_weight = torch.nn.functional.pad(torch_model.qkv.weight, (0, 0, 36, 0))
+        padded_qkv_bias = torch.nn.functional.pad(torch_model.qkv.bias, (0, 36))
 
         # QKV linear layer
         params["qkv"] = {
-            "weight": preprocess_linear_weight(torch_model.qkv.weight, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT),
-            "bias": preprocess_linear_bias(torch_model.qkv.bias, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT)
+            "weight": preprocess_linear_weight(padded_qkv_weight, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT),
+            "bias": preprocess_linear_bias(padded_qkv_bias, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT)
             if torch_model.qkv.bias is not None
             else None,
         }
@@ -45,8 +48,8 @@ def create_window_attention_preprocessor(device):
 @pytest.mark.parametrize(
     "batch_size, num_windows, window_size, dim, num_heads",
     [
-        (1, 16, (16, 16), 192, 6),  # no padding required case - For the qkv optimised case
-        # (3, 16, (16, 16), 180, 6),  # SSR config
+        # (1, 16, (16, 16), 192, 6),  # no padding required case - For the qkv optimised case
+        (3, 16, (16, 16), 180, 6),  # SSR config
     ],
 )
 @pytest.mark.parametrize("device_params", [{"l1_small_size": 32768}], indirect=True)
