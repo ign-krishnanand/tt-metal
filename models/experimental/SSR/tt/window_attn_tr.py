@@ -87,19 +87,35 @@ class TTWindowAttentionTR(LightweightModule):
         # assert_with_pcc(k_ref, k, 0.999)
         # assert_with_pcc(v_ref, v, 0.999)
         # Deallocate the original qkv tensor
-        return q, k, v
+        # return q, k, v
         ttnn.deallocate(qkv)
 
-        # # import pdb; pdb.set_trace()
-        # q = q[:, :, :, :30]
-        # k = k[:, :, :30, :]
-        # v = v[:, :, :, :30]
-        # # -------------------------------------------------------------
+        q = ttnn.from_torch(
+            q,
+            device=self.device,
+            dtype=ttnn.bfloat16,
+            memory_config=self.memory_config,
+            layout=ttnn.TILE_LAYOUT,
+        )
+        k = ttnn.from_torch(
+            k,
+            device=self.device,
+            dtype=ttnn.bfloat16,
+            memory_config=self.memory_config,
+            layout=ttnn.TILE_LAYOUT,
+        )
+        v = ttnn.from_torch(
+            v,
+            device=self.device,
+            dtype=ttnn.bfloat16,
+            memory_config=self.memory_config,
+            layout=ttnn.TILE_LAYOUT,
+        )
 
         # Remove the first dimension
-        # q = ttnn.squeeze(q, 0)
-        # k = ttnn.squeeze(k, 0)
-        # v = ttnn.squeeze(v, 0)
+        q = ttnn.squeeze(q, 0)
+        k = ttnn.squeeze(k, 0)
+        v = ttnn.squeeze(v, 0)
         # import pdb; pdb.set_trace()
 
         # Scale Q
@@ -164,8 +180,7 @@ class TTWindowAttentionTR(LightweightModule):
         # Transpose and reshape back
         x = ttnn.transpose(x, 1, 2, memory_config=self.memory_config)  # [b_, n, num_heads, head_dim]
         # import pdb; pdb.set_trace()
-        # x = ttnn.reshape(x, [b_, n, c], memory_config=self.memory_config)
-        x = ttnn.reshape(x, [b_, n, 192], memory_config=self.memory_config)
+        x = ttnn.reshape(x, [b_, n, c], memory_config=self.memory_config)
         # x = ttnn.slice(x, (0, 0, 0), (b_, n, 180))
         # import pdb; pdb.set_trace()
         # x = x[:, :, :180]
