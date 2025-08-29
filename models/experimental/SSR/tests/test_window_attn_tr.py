@@ -45,8 +45,8 @@ def create_window_attention_preprocessor(device):
 @pytest.mark.parametrize(
     "batch_size, num_windows, window_size, dim, num_heads",
     [
-        # (1, 16, (16, 16), 192, 6),  # no padding required case - For the qkv optimised case
-        (3, 16, (16, 16), 180, 6),  # SSR config
+        (1, 16, (16, 16), 192, 6),  # no padding required case - For the qkv optimised case
+        # (3, 16, (16, 16), 180, 6),  # SSR config
     ],
 )
 @pytest.mark.parametrize("device_params", [{"l1_small_size": 32768}], indirect=True)

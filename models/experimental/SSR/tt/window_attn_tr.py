@@ -42,17 +42,17 @@ class TTWindowAttentionTR(LightweightModule):
         )
         ttnn.deallocate(x)
         # unoptimised method - works for 180 dim
-        qkv = ttnn.reshape(
-            qkv,
-            [b_, n, 3, self.num_heads, self.head_dim],
-            memory_config=ttnn.L1_MEMORY_CONFIG if b_ * n * c < 1_100_000 else ttnn.DRAM_MEMORY_CONFIG,
-        )
-        qkv = ttnn.permute(qkv, [2, 0, 3, 1, 4])  # [3, b_, num_heads, n, head_dim]
+        # qkv = ttnn.reshape(
+        #     qkv,
+        #     [b_, n, 3, self.num_heads, self.head_dim],
+        #     memory_config=ttnn.L1_MEMORY_CONFIG if b_ * n * c < 1_100_000 else ttnn.DRAM_MEMORY_CONFIG,
+        # )
+        # qkv = ttnn.permute(qkv, [2, 0, 3, 1, 4])  # [3, b_, num_heads, n, head_dim]
 
-        # Split Q, K, V
-        q = ttnn.slice(qkv, [0, 0, 0, 0, 0], [1, b_, self.num_heads, n, self.head_dim])
-        k = ttnn.slice(qkv, [1, 0, 0, 0, 0], [2, b_, self.num_heads, n, self.head_dim])
-        v = ttnn.slice(qkv, [2, 0, 0, 0, 0], [3, b_, self.num_heads, n, self.head_dim])
+        # # Split Q, K, V
+        # q = ttnn.slice(qkv, [0, 0, 0, 0, 0], [1, b_, self.num_heads, n, self.head_dim])
+        # k = ttnn.slice(qkv, [1, 0, 0, 0, 0], [2, b_, self.num_heads, n, self.head_dim])
+        # v = ttnn.slice(qkv, [2, 0, 0, 0, 0], [3, b_, self.num_heads, n, self.head_dim])
 
         # -------------------------------------------------------------
 
@@ -60,13 +60,15 @@ class TTWindowAttentionTR(LightweightModule):
         # padding = [(0, 0), (0, 0), (0, 576 - 540)]
         # qkv = ttnn.pad(qkv, padding, 0.0)
         # # import pdb; pdb.set_trace()
-        # (
-        #     q,
-        #     k,
-        #     v,
-        # ) = ttnn.transformer.split_query_key_value_and_split_heads(qkv,memory_config=ttnn.L1_MEMORY_CONFIG,num_heads=self.num_heads)
-        # # Deallocate the original qkv tensor
-        # ttnn.deallocate(qkv)
+        (
+            q,
+            k,
+            v,
+        ) = ttnn.transformer.split_query_key_value_and_split_heads(
+            qkv, memory_config=ttnn.L1_MEMORY_CONFIG, num_heads=self.num_heads
+        )
+        # Deallocate the original qkv tensor
+        ttnn.deallocate(qkv)
 
         # # import pdb; pdb.set_trace()
         # q = q[:, :, :, :30]
@@ -83,12 +85,12 @@ class TTWindowAttentionTR(LightweightModule):
         q = ttnn.multiply(q, self.scale, memory_config=self.memory_config)
 
         # Attention computation: Q @ K^T
-        k_transposed = ttnn.transpose(
-            k, -2, -1, memory_config=self.memory_config
-        )  # not required in the optimised method
+        # k = ttnn.transpose(
+        #     k, -2, -1, memory_config=self.memory_config
+        # )  # not required in the optimised method
         attn = ttnn.matmul(
             q,
-            k_transposed,
+            k,
             compute_kernel_config=ttnn.WormholeComputeKernelConfig(
                 math_fidelity=ttnn.MathFidelity.LoFi,
             ),
@@ -96,7 +98,7 @@ class TTWindowAttentionTR(LightweightModule):
         )
         ttnn.deallocate(q)
         ttnn.deallocate(k)
-        ttnn.deallocate(k_transposed)
+        # ttnn.deallocate(k_transposed)
 
         # Add relative position bias
         # Extract relative position bias from table using rpi indices
