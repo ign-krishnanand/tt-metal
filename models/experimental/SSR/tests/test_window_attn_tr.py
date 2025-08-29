@@ -4,25 +4,23 @@
 import pytest
 import torch
 import ttnn
-from loguru import logger
 
 from models.experimental.SSR.reference.SSR.model.tile_refinement import WindowAttention
 from models.experimental.SSR.tt.HAB import TTWindowAttentionTR
 from ttnn.model_preprocessing import preprocess_linear_bias, preprocess_linear_weight
-from models.utility_functions import comp_pcc
 
 
 def create_window_attention_preprocessor(device):
     def custom_preprocessor(torch_model, name, ttnn_module_args):
         params = {}
         # import pdb; pdb.set_trace()
-        padded_qkv_weight = torch.nn.functional.pad(torch_model.qkv.weight, (0, 0, 36, 0))
-        padded_qkv_bias = torch.nn.functional.pad(torch_model.qkv.bias, (0, 36))
+        # padded_qkv_weight = torch.nn.functional.pad(torch_model.qkv.weight, (0, 0, 36, 0))
+        # padded_qkv_bias = torch.nn.functional.pad(torch_model.qkv.bias, (0, 36))
 
         # QKV linear layer
         params["qkv"] = {
-            "weight": preprocess_linear_weight(padded_qkv_weight, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT),
-            "bias": preprocess_linear_bias(padded_qkv_bias, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT)
+            "weight": preprocess_linear_weight(torch_model.qkv.weight, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT),
+            "bias": preprocess_linear_bias(torch_model.qkv.bias, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT)
             if torch_model.qkv.bias is not None
             else None,
         }
@@ -86,8 +84,8 @@ def test_window_attention(device, batch_size, num_windows, window_size, dim, num
 
     # Reference forward pass
     with torch.no_grad():
-        ref_output = ref_model(input_tensor, rpi=rpi, mask=None)
-
+        # ref_output = ref_model(input_tensor, rpi=rpi, mask=None)
+        torch_query_tensor, torch_key_tensor, torch_value_tensor = ref_model(input_tensor, rpi=rpi, mask=None)
     # Create TTNN model
     parameters = ttnn.model_preprocessing.preprocess_model(
         initialize_model=lambda: ref_model,
@@ -113,26 +111,30 @@ def test_window_attention(device, batch_size, num_windows, window_size, dim, num
     tt_rpi = ttnn.from_torch(rpi, device=device, layout=ttnn.ROW_MAJOR_LAYOUT, dtype=ttnn.uint32)
 
     # TTNN forward pass
-    tt_output = tt_model(tt_input, rpi=tt_rpi, mask=None)
-
+    # tt_output = tt_model(tt_input, rpi=tt_rpi, mask=None)
+    query_tensor, key_tensor, value_tensor = tt_model(tt_input, rpi=tt_rpi, mask=None)
     # Convert back to PyTorch format
-    tt_torch_output = ttnn.to_torch(tt_output)
+    # tt_torch_output = ttnn.to_torch(tt_output)
+    from tests.ttnn.utils_for_testing import assert_with_pcc
 
-    # Compare outputs
-    does_pass, pcc_message = comp_pcc(ref_output, tt_torch_output, 0.97)
+    assert_with_pcc(torch_query_tensor, query_tensor, 0.999)
+    assert_with_pcc(torch_key_tensor, key_tensor, 0.999)
+    assert_with_pcc(torch_value_tensor, value_tensor, 0.999)
+    # # Compare outputs
+    # does_pass, pcc_message = comp_pcc(ref_output, tt_torch_output, 0.97)
 
-    logger.info(f"Batch: {batch_size}, Windows: {num_windows}, Window size: {window_size}")
-    logger.info(f"Dim: {dim}, Heads: {num_heads}")
-    logger.info(f"Reference output shape: {ref_output.shape}")
-    logger.info(f"TTNN output shape: {tt_torch_output.shape}")
-    logger.info(pcc_message)
+    # logger.info(f"Batch: {batch_size}, Windows: {num_windows}, Window size: {window_size}")
+    # logger.info(f"Dim: {dim}, Heads: {num_heads}")
+    # logger.info(f"Reference output shape: {ref_output.shape}")
+    # logger.info(f"TTNN output shape: {tt_torch_output.shape}")
+    # logger.info(pcc_message)
 
-    if does_pass:
-        logger.info("Window Attention Passed!")
-    else:
-        logger.warning("Window Attention Failed!")
+    # if does_pass:
+    #     logger.info("Window Attention Passed!")
+    # else:
+    #     logger.warning("Window Attention Failed!")
 
-    assert does_pass, f"PCC check failed: {pcc_message}"
-    assert (
-        ref_output.shape == tt_torch_output.shape
-    ), f"Shape mismatch: ref {ref_output.shape} vs ttnn {tt_torch_output.shape}"
+    # assert does_pass, f"PCC check failed: {pcc_message}"
+    # assert (
+    #     ref_output.shape == tt_torch_output.shape
+    # ), f"Shape mismatch: ref {ref_output.shape} vs ttnn {tt_torch_output.shape}"

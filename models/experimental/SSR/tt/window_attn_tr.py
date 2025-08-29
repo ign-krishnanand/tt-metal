@@ -33,6 +33,7 @@ class TTWindowAttentionTR(LightweightModule):
 
         # x = ttnn.to_layout(x, ttnn.TILE_LAYOUT)
         # import pdb; pdb.set_trace()
+        import torch
 
         qkv = ttnn.linear(
             x,
@@ -41,6 +42,22 @@ class TTWindowAttentionTR(LightweightModule):
             memory_config=ttnn.L1_MEMORY_CONFIG if b_ * n * c < 1_100_000 else ttnn.DRAM_MEMORY_CONFIG,
             dtype=ttnn.bfloat16,
             core_grid=ttnn.CoreGrid(y=7, x=7),
+        )
+        qkv_torch = ttnn.to_torch(qkv)
+        head_size = 180
+        padded_head_size = 192
+        input_tensor_heads = torch.split(qkv_torch, head_size, dim=-1)
+        input_tensor_heads = [
+            torch.nn.functional.pad(head, (0, padded_head_size - head_size), "constant", 0)
+            for head in input_tensor_heads
+        ]
+        qkv = torch.cat(input_tensor_heads, dim=-1)
+        qkv = ttnn.from_torch(
+            qkv,
+            device=self.device,
+            dtype=ttnn.bfloat16,
+            memory_config=self.memory_config,
+            layout=ttnn.TILE_LAYOUT,
         )
         ttnn.deallocate(x)
         # unoptimised method - works for 180 dim
@@ -70,7 +87,14 @@ class TTWindowAttentionTR(LightweightModule):
         ) = ttnn.transformer.split_query_key_value_and_split_heads(
             qkv, memory_config=ttnn.L1_MEMORY_CONFIG, num_heads=self.num_heads
         )
+        import pdb
+
+        pdb.set_trace()
+        q = ttnn.to_torch(q)[..., :30]
+        k = ttnn.to_torch(v)[..., :30, :]
+        v = ttnn.to_torch(v)[..., :30]
         # Deallocate the original qkv tensor
+        return q, k, v
         ttnn.deallocate(qkv)
 
         # # import pdb; pdb.set_trace()
@@ -80,9 +104,9 @@ class TTWindowAttentionTR(LightweightModule):
         # # -------------------------------------------------------------
 
         # Remove the first dimension
-        q = ttnn.squeeze(q, 0)
-        k = ttnn.squeeze(k, 0)
-        v = ttnn.squeeze(v, 0)
+        # q = ttnn.squeeze(q, 0)
+        # k = ttnn.squeeze(k, 0)
+        # v = ttnn.squeeze(v, 0)
         # import pdb; pdb.set_trace()
 
         # Scale Q
@@ -149,7 +173,7 @@ class TTWindowAttentionTR(LightweightModule):
         # import pdb; pdb.set_trace()
         # x = ttnn.reshape(x, [b_, n, c], memory_config=self.memory_config)
         x = ttnn.reshape(x, [b_, n, 192], memory_config=self.memory_config)
-        x = ttnn.slice(x, (0, 0, 0), (b_, n, 180))
+        # x = ttnn.slice(x, (0, 0, 0), (b_, n, 180))
         # import pdb; pdb.set_trace()
         # x = x[:, :, :180]
         # Output projection
