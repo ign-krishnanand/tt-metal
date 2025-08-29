@@ -1,4 +1,5 @@
 import ttnn
+import torch
 from models.common.lightweightmodule import LightweightModule
 from models.demos.deepseek_v3.utils.config_helpers import matmul_config
 
@@ -25,54 +26,72 @@ class TTWindowAttentionTR(LightweightModule):
 
     def forward(self, x, rpi, mask=None):
         b_, n, c = x.shape
-        # QKV projection
-        # qkv_program_config = matmul_config(x.shape[-2], x.shape[-1], self.qkv_bias.shape[-1], (8, 8))
-        # qkv = ttnn.linear(x, self.qkv_weight, bias=self.qkv_bias, memory_config=self.memory_config, program_config=qkv_program_config)
-        # ttnn.deallocate(x)
 
-        # x = ttnn.to_layout(x, ttnn.TILE_LAYOUT)
-
+        self.memory_config = ttnn.L1_MEMORY_CONFIG if b_ * n * c < 1_100_000 else ttnn.DRAM_MEMORY_CONFIG
         qkv = ttnn.linear(
             x,
             self.qkv_weight,
             bias=self.qkv_bias,
-            memory_config=ttnn.L1_MEMORY_CONFIG if b_ * n * c < 1_100_000 else ttnn.DRAM_MEMORY_CONFIG,
+            memory_config=self.memory_config,
             dtype=ttnn.bfloat16,
             core_grid=ttnn.CoreGrid(y=7, x=7),
         )
         ttnn.deallocate(x)
-        # unoptimised method - works for 180 dim
-        qkv = ttnn.reshape(
-            qkv,
-            [b_, n, 3, self.num_heads, self.head_dim],
-            memory_config=ttnn.L1_MEMORY_CONFIG if b_ * n * c < 1_100_000 else ttnn.DRAM_MEMORY_CONFIG,
+        tile_size = 32
+        # for 180 dim, 540 qkvshape[-1] :- head_size = 30, padded_head_size = 32
+        head_size = qkv.shape[-1] // (3 * self.num_heads)
+        padded_head_size = ((head_size + tile_size - 1) // tile_size) * tile_size
+        pad = padded_head_size != head_size
+        if pad:  # add padding
+            qkv_torch = ttnn.to_torch(qkv)
+            input_tensor_heads = torch.split(qkv_torch, head_size, dim=-1)
+            input_tensor_heads = [
+                torch.nn.functional.pad(head, (0, padded_head_size - head_size), "constant", 0)
+                for head in input_tensor_heads
+            ]
+            qkv = torch.cat(input_tensor_heads, dim=-1)
+            qkv = ttnn.from_torch(
+                qkv,
+                device=self.device,
+                dtype=ttnn.bfloat16,
+                memory_config=self.memory_config,
+                layout=ttnn.TILE_LAYOUT,
+            )
+        (
+            q,
+            k,
+            v,
+        ) = ttnn.transformer.split_query_key_value_and_split_heads(
+            qkv, memory_config=ttnn.L1_MEMORY_CONFIG, num_heads=self.num_heads
         )
-        qkv = ttnn.permute(qkv, [2, 0, 3, 1, 4])  # [3, b_, num_heads, n, head_dim]
 
-        # Split Q, K, V
-        q = ttnn.slice(qkv, [0, 0, 0, 0, 0], [1, b_, self.num_heads, n, self.head_dim])
-        k = ttnn.slice(qkv, [1, 0, 0, 0, 0], [2, b_, self.num_heads, n, self.head_dim])
-        v = ttnn.slice(qkv, [2, 0, 0, 0, 0], [3, b_, self.num_heads, n, self.head_dim])
+        ttnn.deallocate(qkv)
+        if pad:  # remove padding
+            q = ttnn.to_torch(q)[..., :head_size]
+            k = ttnn.to_torch(k)[..., :head_size, :]
+            v = ttnn.to_torch(v)[..., :head_size]
 
-        # -------------------------------------------------------------
-
-        # optimised method - Works for 192 dim
-        # padding = [(0, 0), (0, 0), (0, 576 - 540)]
-        # qkv = ttnn.pad(qkv, padding, 0.0)
-        # # import pdb; pdb.set_trace()
-        # (
-        #     q,
-        #     k,
-        #     v,
-        # ) = ttnn.transformer.split_query_key_value_and_split_heads(qkv,memory_config=ttnn.L1_MEMORY_CONFIG,num_heads=self.num_heads)
-        # # Deallocate the original qkv tensor
-        # ttnn.deallocate(qkv)
-
-        # # import pdb; pdb.set_trace()
-        # q = q[:, :, :, :30]
-        # k = k[:, :, :30, :]
-        # v = v[:, :, :, :30]
-        # # -------------------------------------------------------------
+            q = ttnn.from_torch(
+                q,
+                device=self.device,
+                dtype=ttnn.bfloat16,
+                memory_config=self.memory_config,
+                layout=ttnn.TILE_LAYOUT,
+            )
+            k = ttnn.from_torch(
+                k,
+                device=self.device,
+                dtype=ttnn.bfloat16,
+                memory_config=self.memory_config,
+                layout=ttnn.TILE_LAYOUT,
+            )
+            v = ttnn.from_torch(
+                v,
+                device=self.device,
+                dtype=ttnn.bfloat16,
+                memory_config=self.memory_config,
+                layout=ttnn.TILE_LAYOUT,
+            )
 
         # Remove the first dimension
         q = ttnn.squeeze(q, 0)
@@ -80,29 +99,24 @@ class TTWindowAttentionTR(LightweightModule):
         v = ttnn.squeeze(v, 0)
 
         # Scale Q
-        q = ttnn.multiply(q, self.scale, memory_config=self.memory_config)
+        q = ttnn.multiply(q, self.scale, memory_config=ttnn.L1_MEMORY_CONFIG)
 
-        # Attention computation: Q @ K^T
-        k_transposed = ttnn.transpose(
-            k, -2, -1, memory_config=self.memory_config
-        )  # not required in the optimised method
         attn = ttnn.matmul(
             q,
-            k_transposed,
+            k,
             compute_kernel_config=ttnn.WormholeComputeKernelConfig(
                 math_fidelity=ttnn.MathFidelity.LoFi,
             ),
-            memory_config=ttnn.L1_MEMORY_CONFIG if b_ * n * c < 1_100_000 else ttnn.DRAM_MEMORY_CONFIG,
+            memory_config=self.memory_config,
         )
         ttnn.deallocate(q)
         ttnn.deallocate(k)
-        ttnn.deallocate(k_transposed)
 
         # Add relative position bias
         # Extract relative position bias from table using rpi indices
         window_area = self.window_size[0] * self.window_size[1]
 
-        rpi_flat = ttnn.reshape(rpi, [-1])
+        rpi_flat = ttnn.reshape(rpi, [-1], memory_config=self.memory_config)
         relative_position_bias = ttnn.embedding(
             rpi_flat, self.relative_position_bias_table, memory_config=self.memory_config
         )
@@ -135,21 +149,12 @@ class TTWindowAttentionTR(LightweightModule):
             compute_kernel_config=ttnn.WormholeComputeKernelConfig(
                 math_fidelity=ttnn.MathFidelity.LoFi,
             ),
-            memory_config=self.memory_config,
+            memory_config=ttnn.L1_MEMORY_CONFIG,
         )  # [b_, num_heads, n, head_dim]
 
         # Transpose and reshape back
         x = ttnn.transpose(x, 1, 2, memory_config=self.memory_config)  # [b_, n, num_heads, head_dim]
-        # import pdb; pdb.set_trace()
         x = ttnn.reshape(x, [b_, n, c], memory_config=self.memory_config)
-        # x = ttnn.reshape(x, [b_, n, 192], memory_config=self.memory_config)
-        # import pdb; pdb.set_trace()
-        # x = x[:, :, :180]
-        # Output projection
-        # program_config = matmul_config(
-        #     x.shape[-2], x.shape[-1], self.proj_bias.shape[-1], (7, 7)
-        # )
-        # import pdb; pdb.set_trace()
         program_config = matmul_config(x.shape[-2], x.shape[-1], self.proj_bias.shape[-1], (8, 8))
         x = ttnn.linear(
             x, self.proj_weight, bias=self.proj_bias, memory_config=self.memory_config, program_config=program_config
