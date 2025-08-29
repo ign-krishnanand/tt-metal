@@ -86,24 +86,21 @@ class TTWindowAttention(nn.Module):
         ttnn.deallocate(input_tensor)
 
         # Reshape and permute QKV
-        qkv = ttnn.reshape(qkv, (B_, N, 3, self.num_heads, C // self.num_heads), memory_config=ttnn.L1_MEMORY_CONFIG)
-        qkv = ttnn.permute(qkv, (2, 0, 3, 1, 4), memory_config=ttnn.L1_MEMORY_CONFIG)
 
-        # Extract Q, K, V
-        q = qkv[0:1, :, :, :, :]
-        k = qkv[1:2, :, :, :, :]
-        v = qkv[2:3, :, :, :, :]
+        # Split QKV using built-in function
+        (
+            q,
+            k,
+            v,
+        ) = ttnn.transformer.split_query_key_value_and_split_heads(
+            qkv, memory_config=ttnn.DRAM_MEMORY_CONFIG, num_heads=self.num_heads, transpose_key=True
+        )
         ttnn.deallocate(qkv)
-
-        q = ttnn.squeeze(q, 0)
-        k = ttnn.squeeze(k, 0)
-        v = ttnn.squeeze(v, 0)
 
         # Apply scaling
         q = q * self.scale
 
         # Compute attention scores
-        k = ttnn.permute(k, (0, 1, 3, 2), memory_config=ttnn.L1_MEMORY_CONFIG)
         attn = ttnn.matmul(
             q,
             k,
@@ -126,6 +123,8 @@ class TTWindowAttention(nn.Module):
             attn = ttnn.reshape(attn, (B_ // nW, nW, self.num_heads, N, N), memory_config=ttnn.L1_MEMORY_CONFIG)
             attn = attn + ttnn.unsqueeze(ttnn.unsqueeze(mask, 1), 0)
             attn = ttnn.reshape(attn, (-1, self.num_heads, N, N), memory_config=ttnn.L1_MEMORY_CONFIG)
+
+            ttnn.deallocate(mask)
 
         # Apply softmax
         attn = ttnn.softmax(attn, dim=-1, memory_config=ttnn.L1_MEMORY_CONFIG)

@@ -86,7 +86,7 @@ def create_swin_transformer_block_preprocessor(device):
 @pytest.mark.parametrize(
     "batch_size, height, width, dim, num_heads, window_size, shift_size, mlp_ratio",
     (
-        # # Regular window attention (no shift)
+        # # # Regular window attention (no shift)
         (1, 14, 14, 96, 3, 7, 0, 4.0),
         (2, 14, 14, 192, 6, 7, 0, 4.0),
         # Shifted window attention
@@ -98,9 +98,20 @@ def create_swin_transformer_block_preprocessor(device):
         # Non-square input (requires padding)
         (1, 15, 13, 96, 3, 7, 0, 4.0),
         (1, 15, 13, 96, 3, 7, 3, 4.0),
+        # Tile selection testcases
+        (3, 128, 128, 96, 3, 7, 0, 4.0),
+        (3, 128, 128, 96, 3, 7, 3, 4.0),
+        (3, 64, 64, 96, 3, 7, 0, 4.0),
+        (3, 64, 64, 96, 3, 7, 3, 4.0),
+        (3, 32, 32, 96, 3, 7, 0, 4.0),
+        (3, 32, 32, 96, 3, 7, 3, 4.0),
+        (3, 16, 16, 96, 3, 7, 0, 4.0),
+        (3, 16, 16, 96, 3, 7, 3, 4.0),
+        (3, 8, 8, 96, 3, 7, 0, 4.0),
+        (3, 8, 8, 96, 3, 7, 3, 4.0),
     ),
 )
-def test_swin_transformer_block(batch_size, height, width, dim, num_heads, window_size, shift_size, mlp_ratio):
+def test_swin_transformer_block(device, batch_size, height, width, dim, num_heads, window_size, shift_size, mlp_ratio):
     # Create input tensor
     input_shape = (batch_size, height * width, dim)
     x = torch.randn(input_shape)
@@ -124,61 +135,56 @@ def test_swin_transformer_block(batch_size, height, width, dim, num_heads, windo
     ref_output = ref_layer(x)
 
     # Initialize device
-    device = ttnn.open_device(device_id=0)
 
-    try:
-        # Preprocess model parameters
-        parameters = preprocess_model_parameters(
-            initialize_model=lambda: ref_layer,
-            custom_preprocessor=create_swin_transformer_block_preprocessor(device),
-            device=device,
-        )
+    # Preprocess model parameters
+    parameters = preprocess_model_parameters(
+        initialize_model=lambda: ref_layer,
+        custom_preprocessor=create_swin_transformer_block_preprocessor(device),
+        device=device,
+    )
 
-        # Create TTNN model
-        tt_layer = TTSwinTransformerBlock(
-            parameters=parameters,
-            device=device,
-            dim=dim,
-            input_resolution=(height, width),
-            num_heads=num_heads,
-            window_size=window_size,
-            shift_size=shift_size,
-            mlp_ratio=mlp_ratio,
-        )
+    # Create TTNN model
+    tt_layer = TTSwinTransformerBlock(
+        parameters=parameters,
+        device=device,
+        dim=dim,
+        input_resolution=(height, width),
+        num_heads=num_heads,
+        window_size=window_size,
+        shift_size=shift_size,
+        mlp_ratio=mlp_ratio,
+    )
 
-        # Convert input to TTNN tensor
-        tt_input = ttnn.from_torch(x, device=device, layout=ttnn.TILE_LAYOUT)
+    # Convert input to TTNN tensor
+    tt_input = ttnn.from_torch(x, device=device, layout=ttnn.TILE_LAYOUT, dtype=ttnn.bfloat8_b)
+    tt_input = ttnn.to_memory_config(tt_input, ttnn.L1_MEMORY_CONFIG)
 
-        # Run forward pass
-        tt_output = tt_layer(tt_input)
+    # Run forward pass
+    tt_output = tt_layer(tt_input)
 
-        # Convert back to torch
-        tt_torch_output = tt2torch_tensor(tt_output)
+    # Convert back to torch
+    tt_torch_output = tt2torch_tensor(tt_output)
 
-        # Compare outputs
-        does_pass, pcc_message = comp_pcc(
-            ref_output, tt_torch_output, 0.98
-        )  # Slightly lower threshold due to accumulated precision differences
+    # Compare outputs
+    does_pass, pcc_message = comp_pcc(
+        ref_output, tt_torch_output, 0.98
+    )  # Slightly lower threshold due to accumulated precision differences
 
-        logger.info(
-            f"Test configuration: B={batch_size}, H={height}, W={width}, dim={dim}, heads={num_heads}, ws={window_size}, shift={shift_size}"
-        )
-        logger.info(pcc_message)
+    logger.info(
+        f"Test configuration: B={batch_size}, H={height}, W={width}, dim={dim}, heads={num_heads}, ws={window_size}, shift={shift_size}"
+    )
+    logger.info(pcc_message)
 
-        if does_pass:
-            logger.info("SwinTransformerBlock Passed!")
-        else:
-            logger.warning("SwinTransformerBlock Failed!")
-            logger.warning(f"Reference output shape: {ref_output.shape}")
-            logger.warning(f"TTNN output shape: {tt_torch_output.shape}")
-            logger.warning(f"Reference output range: [{ref_output.min():.6f}, {ref_output.max():.6f}]")
-            logger.warning(f"TTNN output range: [{tt_torch_output.min():.6f}, {tt_torch_output.max():.6f}]")
+    if does_pass:
+        logger.info("SwinTransformerBlock Passed!")
+    else:
+        logger.warning("SwinTransformerBlock Failed!")
+        logger.warning(f"Reference output shape: {ref_output.shape}")
+        logger.warning(f"TTNN output shape: {tt_torch_output.shape}")
+        logger.warning(f"Reference output range: [{ref_output.min():.6f}, {ref_output.max():.6f}]")
+        logger.warning(f"TTNN output range: [{tt_torch_output.min():.6f}, {tt_torch_output.max():.6f}]")
 
-        assert does_pass
-
-    finally:
-        # Cleanup
-        ttnn.close_device(device)
+    assert does_pass
 
 
 @pytest.mark.parametrize(
