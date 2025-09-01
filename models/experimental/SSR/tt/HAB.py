@@ -21,7 +21,7 @@ class TTHAB(LightweightModule):
     ):
         super().__init__()
         self.device = device
-        self.memory_config = memory_config or ttnn.DRAM_MEMORY_CONFIG
+        self.memory_config = memory_config or ttnn.L1_MEMORY_CONFIG
         self.dim = dim
         self.input_resolution = input_resolution
         self.num_heads = num_heads
@@ -64,20 +64,25 @@ class TTHAB(LightweightModule):
         )
 
     def forward(self, x, x_size, rpi_sa, attn_mask):
+        # import pdb;
         h, w = x_size
         b, seq_len, c = x.shape
+        if x.memory_config().buffer_type != ttnn.BufferType.L1:
+            x = ttnn.to_memory_config(x, ttnn.L1_MEMORY_CONFIG)
         shortcut = x
 
         # Layer norm 1
-        x = ttnn.layer_norm(x, weight=self.norm1_weight, bias=self.norm1_bias)
+        x = ttnn.layer_norm(x, weight=self.norm1_weight, bias=self.norm1_bias, memory_config=self.memory_config)
 
         # Reshape to spatial format for conv and attention
-        x = ttnn.reshape(x, [b, h, w, c])
+        x = ttnn.reshape(x, [b, h, w, c], memory_config=self.memory_config)
+        # pdb.set_trace()
 
         # Convolutional branch
         conv_x = self.conv_block(x)
-        conv_x = ttnn.reshape(conv_x, [b, h * w, c])
-        conv_x = ttnn.multiply(conv_x, self.conv_scale)
+        conv_x = ttnn.reshape(conv_x, [b, h * w, c], memory_config=self.memory_config)
+        # pdb.set_trace()
+        conv_x = ttnn.multiply(conv_x, self.conv_scale, memory_config=self.memory_config)
 
         # Attention branch - handle cyclic shift
         if self.shift_size > 0:
@@ -89,14 +94,23 @@ class TTHAB(LightweightModule):
             current_attn_mask = None
 
         # Window partition
+        if shifted_x.memory_config().buffer_type != ttnn.BufferType.L1:
+            shifted_x = ttnn.to_memory_config(shifted_x, self.memory_config)
         x_windows = self._window_partition(shifted_x, self.window_size)
-        x_windows = ttnn.reshape(x_windows, [-1, self.window_size * self.window_size, c])
+        x_windows = ttnn.reshape(
+            x_windows, [-1, self.window_size * self.window_size, c], memory_config=self.memory_config
+        )
+        # pdb.set_trace()
 
         # Window attention
+        # pdb.set_trace()
         attn_windows = self.attn(x_windows, rpi=rpi_sa, mask=current_attn_mask)
 
         # Window reverse
-        attn_windows = ttnn.reshape(attn_windows, [-1, self.window_size, self.window_size, c])
+        attn_windows = ttnn.reshape(
+            attn_windows, [-1, self.window_size, self.window_size, c], memory_config=self.memory_config
+        )
+        # pdb.set_trace()
         shifted_x = self._window_reverse(attn_windows, self.window_size, h, w)
 
         # Reverse cyclic shift
@@ -105,33 +119,42 @@ class TTHAB(LightweightModule):
         else:
             attn_x = shifted_x
 
-        attn_x = ttnn.reshape(attn_x, [b, h * w, c])
+        if attn_x.memory_config().buffer_type != ttnn.BufferType.L1:
+            attn_x = ttnn.to_memory_config(attn_x, ttnn.L1_MEMORY_CONFIG)
+        attn_x = ttnn.reshape(attn_x, [b, h * w, c], memory_config=self.memory_config)
+        # pdb.set_trace()
 
         # First residual connection
-        x = ttnn.add(shortcut, attn_x)
-        x = ttnn.add(x, conv_x)
+        x = ttnn.add(shortcut, attn_x, memory_config=self.memory_config)
+        x = ttnn.add(x, conv_x, memory_config=self.memory_config)
 
         # MLP branch
-        x_norm = ttnn.layer_norm(x, weight=self.norm2_weight, bias=self.norm2_bias)
+        x_norm = ttnn.layer_norm(x, weight=self.norm2_weight, bias=self.norm2_bias, memory_config=self.memory_config)
         mlp_out = self.mlp(x_norm)
 
         # Second residual connection
-        x = ttnn.add(x, mlp_out)
+        x = ttnn.add(x, mlp_out, memory_config=self.memory_config)
 
         return x
 
     def _window_partition(self, x, window_size):
         """Partition into non-overlapping windows"""
         b, h, w, c = x.shape
-        x = ttnn.reshape(x, [b, h // window_size, window_size, w // window_size, window_size, c])
-        x = ttnn.permute(x, [0, 1, 3, 2, 4, 5])
-        windows = ttnn.reshape(x, [-1, window_size, window_size, c])
+        x = ttnn.reshape(
+            x, [b, h // window_size, window_size, w // window_size, window_size, c], memory_config=self.memory_config
+        )
+        x = ttnn.permute(x, [0, 1, 3, 2, 4, 5], memory_config=self.memory_config)
+        windows = ttnn.reshape(x, [-1, window_size, window_size, c], memory_config=self.memory_config)
         return windows
 
     def _window_reverse(self, windows, window_size, h, w):
         """Reverse window partition"""
         b = windows.shape[0] // (h * w // window_size // window_size)
-        x = ttnn.reshape(windows, [b, h // window_size, w // window_size, window_size, window_size, -1])
-        x = ttnn.permute(x, [0, 1, 3, 2, 4, 5])
-        x = ttnn.reshape(x, [b, h, w, -1])
+        x = ttnn.reshape(
+            windows,
+            [b, h // window_size, w // window_size, window_size, window_size, -1],
+            memory_config=self.memory_config,
+        )
+        x = ttnn.permute(x, [0, 1, 3, 2, 4, 5], memory_config=self.memory_config)
+        x = ttnn.reshape(x, [b, h, w, -1], memory_config=self.memory_config)
         return x

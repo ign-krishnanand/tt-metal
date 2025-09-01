@@ -26,7 +26,8 @@ class TTWindowAttentionTR(LightweightModule):
 
     def forward(self, x, rpi, mask=None):
         b_, n, c = x.shape
-
+        if x.memory_config().buffer_type != ttnn.BufferType.L1:
+            x = ttnn.to_memory_config(x, ttnn.L1_MEMORY_CONFIG)
         self.memory_config = ttnn.L1_MEMORY_CONFIG if b_ * n * c < 1_100_000 else ttnn.DRAM_MEMORY_CONFIG
         qkv = ttnn.linear(
             x,
