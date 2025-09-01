@@ -137,8 +137,11 @@ def test_tile_selection(image_size, patch_size, token_size, num_cls):
         # Create TTNN implementation
         tt_layer = TTTileSelection(device=device, parameters=parameters, args=args, num_cls=num_cls)
 
+        # NCHW -> NHWC
+        input_tensor = input_tensor.permute(0, 2, 3, 1)
+
         # Convert input to TTNN
-        tt_input = ttnn.from_torch(input_tensor, device=device, layout=ttnn.TILE_LAYOUT, dtype=ttnn.bfloat8_b)
+        tt_input = ttnn.from_torch(input_tensor, device=device, layout=ttnn.TILE_LAYOUT, dtype=ttnn.bfloat16)
 
         # Run TTNN implementation
         tt_output = tt_layer(tt_input)
