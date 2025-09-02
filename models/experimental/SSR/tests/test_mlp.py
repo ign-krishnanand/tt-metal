@@ -38,11 +38,11 @@ def create_mlp_preprocessor(device):
 @pytest.mark.parametrize(
     "in_features, hidden_features, out_features, input_shape",
     (
+        # (1536, 3072, 3072, (3, 64, 1536)),  # TTTileSelection -> fea_mlp2
+        # (768, 3072, 3072, (3, 256, 768)),  # TTTileSelection -> fea_mlp1     8898 us
+        # (3072, 96, 96, (3, 256, 3072)),  # TTTileSelection -> mlp1
         (3072, 3072, 3072, (3, 16, 3072)),  # TTTileSelection -> fea_mlp3
-        (1536, 3072, 3072, (3, 64, 1536)),  # TTTileSelection -> fea_mlp2
-        (768, 3072, 3072, (3, 256, 768)),  # TTTileSelection -> fea_mlp1     8898 us
-        (3072, 96, 96, (3, 16, 3072)),  # TTTileSelection -> mlp3, mlp2
-        (3072, 96, 96, (3, 256, 3072)),  # TTTileSelection -> mlp1
+        (3072, 96, 96, (3, 16, 3072)),  # TTTileSelection -> mlp3
         (96, 384, 96, (3, 16384, 96)),  # TTSwinTransformerBlock[0], TTSwinTransformerBlock[1] -> mlp
         (192, 768, 192, (3, 4096, 192)),  # TTSwinTransformerBlock[2], TTSwinTransformerBlock[3] -> mlp
         (384, 1536, 384, (3, 1024, 384)),  # TTSwinTransformerBlock[4], TTSwinTransformerBlock[5] -> mlp

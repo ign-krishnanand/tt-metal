@@ -50,12 +50,17 @@ def create_patch_merging_preprocessor(device):
 @pytest.mark.parametrize(
     "batch_size, input_resolution, dim",
     [
-        (1, (56, 56), 96),  # Swin-Tiny stage 1 -> 2
-        (2, (28, 28), 192),  # Swin-Tiny stage 2 -> 3
-        (1, (14, 14), 384),  # Swin-Tiny stage 3 -> 4
-        (1, (112, 112), 128),  # Swin-Small stage 1 -> 2
-        (2, (56, 56), 256),  # Swin-Small stage 2 -> 3
-        (1, (32, 32), 256),  # Custom resolution
+        # (1, (56, 56), 96),  # Swin-Tiny stage 1 -> 2
+        # (2, (28, 28), 192),  # Swin-Tiny stage 2 -> 3
+        # (1, (14, 14), 384),  # Swin-Tiny stage 3 -> 4
+        # (1, (112, 112), 128),  # Swin-Small stage 1 -> 2
+        # (2, (56, 56), 256),  # Swin-Small stage 2 -> 3
+        # (1, (32, 32), 256),  # Custom resolution
+        (3, (128, 128), 96),  # Custom resolution
+        (3, (64, 64), 192),  # Custom resolution
+        (3, (32, 32), 384),  # Custom resolution
+        (3, (16, 16), 768),  # Custom resolution
+        (3, (8, 8), 1536),  # Custom resolution
     ],
 )
 def test_patch_merging(device, batch_size, input_resolution, dim):

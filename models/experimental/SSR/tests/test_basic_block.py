@@ -22,55 +22,6 @@ def to_2tuple(x):
     return (x, x)
 
 
-# def create_basic_layer_preprocessor(device):
-#     def custom_preprocessor(torch_model, name, ttnn_module_args):
-#         params = {"blocks": {}}
-
-#         # Process each transformer block
-#         for i, block in enumerate(torch_model.blocks):
-#             params["blocks"][i] = {
-#                 "norm1": {
-#                     "weight": ttnn.from_torch(block.norm1.weight, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device),
-#                     "bias": ttnn.from_torch(block.norm1.bias, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device),
-#                 },
-#                 "norm2": {
-#                     "weight": ttnn.from_torch(block.norm2.weight, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device),
-#                     "bias": ttnn.from_torch(block.norm2.bias, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device),
-#                 },
-#                 "mlp": {
-#                     "fc1": {
-#                         "weight": ttnn.from_torch(block.mlp.fc1.weight.transpose(0, 1), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device),
-#                         "bias": ttnn.from_torch(block.mlp.fc1.bias, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device),
-#                     },
-#                     "fc2": {
-#                         "weight": ttnn.from_torch(block.mlp.fc2.weight.transpose(0, 1), dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device),
-#                         "bias": ttnn.from_torch(block.mlp.fc2.bias, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device),
-#                     },
-#                 },
-#                 "attn": {}  # Simplified attention parameters
-#             }
-
-#         # Process downsampling layer if present
-#         if torch_model.downsample is not None:
-#             params["downsample"] = {
-#                 "reduction": {
-#                     "weight": ttnn.from_torch(
-#                         torch_model.downsample.reduction.weight.transpose(0, 1),
-#                         dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device
-#                     )
-#                 },
-#                 "norm": {
-#                     "weight": ttnn.from_torch(torch_model.downsample.norm.weight, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device),
-#                     "bias": ttnn.from_torch(torch_model.downsample.norm.bias, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=device),
-#                 }
-#             }
-
-#         return params
-
-#     return custom_preprocessor
-#
-
-
 def create_basic_layer_preprocessor(device):
     def custom_preprocessor(torch_model, name, ttnn_module_args):
         params = {"blocks": {}}
@@ -199,12 +150,11 @@ def create_basic_layer_preprocessor(device):
 @pytest.mark.parametrize(
     "batch_size, input_resolution, dim, depth, num_heads, window_size, has_downsample",
     [
-        (1, (56, 56), 96, 2, 3, 7, False),  # Swin-Tiny stage 1 without downsample
-        (1, (56, 56), 96, 2, 3, 7, True),  # Swin-Tiny stage 1 with downsample
-        (2, (28, 28), 192, 2, 6, 7, True),  # Swin-Tiny stage 2
-        (1, (14, 14), 384, 6, 12, 7, True),  # Swin-Tiny stage 3
-        (1, (7, 7), 768, 2, 24, 7, False),  # Swin-Tiny stage 4 (no downsample)
-        (1, (32, 32), 128, 4, 4, 8, True),  # Custom configuration
+        (3, (128, 128), 96, 2, 3, 7, True),  # Custom configuration
+        (3, (64, 64), 192, 2, 3, 7, True),  # Custom configuration
+        (3, (32, 32), 384, 2, 3, 7, True),  # Custom configuration
+        (3, (16, 16), 768, 2, 3, 7, True),  # Custom configuration
+        (3, (8, 8), 1536, 2, 3, 7, True),  # Custom configuration
     ],
 )
 def test_basic_layer(device, batch_size, input_resolution, dim, depth, num_heads, window_size, has_downsample):
