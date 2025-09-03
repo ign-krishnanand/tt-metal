@@ -1,7 +1,6 @@
 import ttnn
 import torch
 from models.common.lightweightmodule import LightweightModule
-from models.demos.deepseek_v3.utils.config_helpers import matmul_config
 
 
 class TTWindowAttentionTR(LightweightModule):
@@ -109,27 +108,11 @@ class TTWindowAttentionTR(LightweightModule):
                 math_fidelity=ttnn.MathFidelity.LoFi,
             ),
             memory_config=self.memory_config,
+            core_grid=ttnn.CoreGrid(y=8, x=8),
         )
         ttnn.deallocate(q)
         ttnn.deallocate(k)
 
-        # Add relative position bias
-        # Extract relative position bias from table using rpi indices
-        # window_area = self.window_size[0] * self.window_size[1]
-
-        # rpi_flat = ttnn.reshape(rpi, [-1], memory_config=self.memory_config)
-        # relative_position_bias = ttnn.embedding(
-        #     rpi_flat, self.relative_position_bias_table, memory_config=self.memory_config
-        # )
-        # relative_position_bias = ttnn.reshape(
-        #     relative_position_bias, [window_area, window_area, self.num_heads], memory_config=self.memory_config
-        # )
-        # relative_position_bias = ttnn.permute(
-        #     relative_position_bias, [2, 0, 1], memory_config=self.memory_config
-        # )  # [num_heads, window_area, window_area]
-
-        # # Add bias to attention
-        # relative_position_bias = ttnn.unsqueeze(relative_position_bias, 0)  # [1, num_heads, window_area, window_area]
         attn = ttnn.add(attn, self.relative_position_bias, memory_config=self.memory_config)
 
         # Apply mask if provided
@@ -151,13 +134,30 @@ class TTWindowAttentionTR(LightweightModule):
                 math_fidelity=ttnn.MathFidelity.LoFi,
             ),
             memory_config=ttnn.L1_MEMORY_CONFIG,
+            core_grid=ttnn.CoreGrid(y=8, x=8),
         )  # [b_, num_heads, n, head_dim]
 
         # Transpose and reshape back
         x = ttnn.transpose(x, 1, 2, memory_config=self.memory_config)  # [b_, n, num_heads, head_dim]
         x = ttnn.reshape(x, [b_, n, c], memory_config=self.memory_config)
-        program_config = matmul_config(x.shape[-2], x.shape[-1], self.proj_bias.shape[-1], (8, 8))
+
+        # x = ttnn.pad(x, ((0, 0), (0, 0), (0, 0), (0, 2)), value=0.0)
+        # TODO: fix this
+        # x = ttnn.transformer.concatenate_heads(
+        #     x,
+        #     memory_config=self.memory_config
+        # )
+        # original_final_dim = 6 * 30  # 180 in your case
+        # start_indices = [0, 0, 0]
+        # end_indices = [x.shape[0], x.shape[1], original_final_dim]
+        # x = ttnn.slice(x, start_indices, end_indices, memory_config=self.memory_config)
+        # program_config = matmul_config(x.shape[-2], x.shape[-1], self.proj_bias.shape[-1])
         x = ttnn.linear(
-            x, self.proj_weight, bias=self.proj_bias, memory_config=self.memory_config, program_config=program_config
+            x,
+            self.proj_weight,
+            bias=self.proj_bias,
+            memory_config=self.memory_config,
+            core_grid=ttnn.CoreGrid(y=8, x=8),
+            # program_config=program_config,
         )
         return x
