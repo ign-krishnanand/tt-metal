@@ -64,6 +64,7 @@ class TTHAB(LightweightModule):
         )
 
     def forward(self, x, x_size, rpi_sa, attn_mask):
+        print("HAB")
         h, w = x_size
         b, seq_len, c = x.shape
         if x.memory_config().buffer_type != ttnn.BufferType.L1:
@@ -81,7 +82,7 @@ class TTHAB(LightweightModule):
         conv_x = ttnn.reshape(conv_x, [b, h * w, c])
         conv_x = ttnn.multiply(conv_x, self.conv_scale)
 
-        # Attention branch - handle cyclic shift
+        # Attention branch - handle cyclic shifttt-metal
         if self.shift_size > 0:
             # Cyclic shift
             shifted_x = ttnn.roll(x, [-self.shift_size, -self.shift_size], [1, 2])

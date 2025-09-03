@@ -19,7 +19,7 @@ from models.utility_functions import (
 )
 
 
-def create_tile_refinement_preprocessor(device, forward_params):
+def create_tile_refinement_preprocessor(device, forward_params, window_size, rpi_sa):
     """Custom preprocessor for TileRefinement model"""
 
     def custom_preprocessor(torch_model, name, ttnn_module_args):
@@ -36,41 +36,7 @@ def create_tile_refinement_preprocessor(device, forward_params):
                         conv_config = ttnn.Conv2dConfig(weights_dtype=ttnn.bfloat16)
                         parameters[conv_name] = {
                             "weight": ttnn.from_torch(conv_layer.weight, dtype=ttnn.bfloat16),
-                            # input_memory_config=ttnn.DRAM_MEMORY_CONFIG,
-                            # input_layout=ttnn.TILE_LAYOUT,
-                            # weights_format="OIHW",
-                            # in_channels=conv_layer.in_channels,
-                            # out_channels=conv_layer.out_channels,
-                            # batch_size=1,
-                            # input_height=64,
-                            # input_width=64,
-                            # kernel_size=(3, 3),
-                            # stride=(1, 1),
-                            # padding=(1, 1),
-                            # dilation=(1, 1),
-                            # has_bias=True,
-                            # groups=1,
-                            # device=device,
-                            # input_dtype=ttnn.bfloat16,
-                            # conv_config=conv_config,
-                            # ),
                             "bias": ttnn.from_torch(conv_layer.bias.reshape(1, 1, 1, -1), dtype=ttnn.bfloat16),
-                            #     input_memory_config=ttnn.DRAM_MEMORY_CONFIG,
-                            #     input_layout=ttnn.TILE_LAYOUT,
-                            #     in_channels=conv_layer.in_channels,
-                            #     out_channels=conv_layer.out_channels,
-                            #     batch_size=1,
-                            #     input_height=64,
-                            #     input_width=64,
-                            #     kernel_size=(3, 3),
-                            #     stride=(1, 1),
-                            #     padding=(1, 1),
-                            #     dilation=(1, 1),
-                            #     groups=1,
-                            #     device=device,
-                            #     input_dtype=ttnn.bfloat16,
-                            #     conv_config=conv_config,
-                            # ),
                         }
 
             # Handle conv_before_upsample (Sequential layer)
@@ -79,53 +45,13 @@ def create_tile_refinement_preprocessor(device, forward_params):
                 conv_config = ttnn.Conv2dConfig(weights_dtype=ttnn.bfloat16)
                 parameters["conv_before_upsample"] = {
                     "weight": ttnn.from_torch(conv_layer.weight, dtype=ttnn.bfloat16),  # ttnn.prepare_conv_weights(
-                    # weight_tensor=ttnn.from_torch(conv_layer.weight, dtype=ttnn.bfloat16),
-                    #     input_memory_config=ttnn.DRAM_MEMORY_CONFIG,
-                    #     input_layout=ttnn.TILE_LAYOUT,
-                    #     weights_format="OIHW",
-                    #     in_channels=conv_layer.in_channels,
-                    #     out_channels=conv_layer.out_channels,
-                    #     batch_size=1,
-                    #     input_height=64,
-                    #     input_width=64,
-                    #     kernel_size=(3, 3),
-                    #     stride=(1, 1),
-                    #     padding=(1, 1),
-                    #     dilation=(1, 1),
-                    #     has_bias=True,
-                    #     groups=1,
-                    #     device=device,
-                    #     input_dtype=ttnn.bfloat16,
-                    #     conv_config=conv_config,
-                    # ),
                     "bias": ttnn.from_torch(  # ttnn.prepare_conv_bias(
                         conv_layer.bias.reshape(1, 1, 1, -1), dtype=ttnn.bfloat16
                     ),
-                    # bias_tensor=ttnn.from_torch(conv_layer.bias.reshape(1, 1, 1, -1), dtype=ttnn.bfloat16),
-                    #     input_memory_config=ttnn.DRAM_MEMORY_CONFIG,
-                    #     input_layout=ttnn.TILE_LAYOUT,
-                    #     in_channels=conv_layer.in_channels,
-                    #     out_channels=conv_layer.out_channels,
-                    #     batch_size=1,
-                    #     input_height=64,
-                    #     input_width=64,
-                    #     kernel_size=(3, 3),
-                    #     stride=(1, 1),
-                    #     padding=(1, 1),
-                    #     dilation=(1, 1),
-                    #     groups=1,
-                    #     device=device,
-                    #     input_dtype=ttnn.bfloat16,
-                    #     conv_config=conv_config,
-                    # ),
                 }
 
             # Preprocess layer norm
             if hasattr(torch_model, "norm"):
-                # parameters["norm"] = {}
-                # parameters["norm"]["weight"] = ttnn.from_torch(torch_model.norm.weight, dtype=ttnn.bfloat16)
-                # parameters["norm"]["bias"] = ttnn.from_torch(torch_model.norm.bias, dtype=ttnn.bfloat16)
-
                 dim = torch_model.norm.weight.size(0)  # 180
                 padded_dim = ((dim + 31) // 32) * 32  # Round up to nearest multiple of 32 = 192
 
@@ -171,17 +97,15 @@ def create_tile_refinement_preprocessor(device, forward_params):
                 parameters["upsample"] = upsample_params
 
             if hasattr(torch_model, "layers"):
-                # import pdb; pdb.set_trace()
                 for i in range(len(torch_model.layers)):
                     rhag_params = preprocess_model_parameters(
                         initialize_model=lambda: torch_model.layers[i],
-                        custom_preprocessor=create_rhag_preprocessor(device, depth=6),
+                        custom_preprocessor=create_rhag_preprocessor(
+                            device, depth=6, window_size=window_size, rpi_sa=rpi_sa
+                        ),
                         device=device,
                     )
                     parameters[f"layers.{i}"] = rhag_params
-
-            # Add placeholder for other components (patch_embed, layers, upsample)
-            # These would need to be implemented based on your existing preprocessors
 
         return parameters
 
@@ -267,7 +191,7 @@ def test_tile_refinement(
         parameters = preprocess_model_parameters(
             initialize_model=lambda: ref_model,
             # custom_preprocessor=create_tile_refinement_preprocessor(device, params),
-            custom_preprocessor=create_tile_refinement_preprocessor(device, tt_params),
+            custom_preprocessor=create_tile_refinement_preprocessor(device, tt_params, window_size, rpi_sa),
             device=device,
         )
         # import pdb; pdb.set_trace()

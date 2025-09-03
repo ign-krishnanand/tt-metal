@@ -19,7 +19,7 @@ class TTWindowAttentionTR(LightweightModule):
         self.qkv_bias = parameters["qkv"]["bias"] if "bias" in parameters["qkv"] else None
         self.proj_weight = parameters["proj"]["weight"]
         self.proj_bias = parameters["proj"]["bias"] if "bias" in parameters["proj"] else None
-        self.relative_position_bias_table = parameters["relative_position_bias_table"]
+        self.relative_position_bias = parameters["relative_position_bias"]
 
         # Scale factor
         self.scale = self.head_dim**-0.5
@@ -35,7 +35,7 @@ class TTWindowAttentionTR(LightweightModule):
             bias=self.qkv_bias,
             memory_config=self.memory_config,
             dtype=ttnn.bfloat16,
-            core_grid=ttnn.CoreGrid(y=7, x=7),
+            core_grid=ttnn.CoreGrid(y=8, x=8),
         )
         ttnn.deallocate(x)
         tile_size = 32
@@ -115,22 +115,22 @@ class TTWindowAttentionTR(LightweightModule):
 
         # Add relative position bias
         # Extract relative position bias from table using rpi indices
-        window_area = self.window_size[0] * self.window_size[1]
+        # window_area = self.window_size[0] * self.window_size[1]
 
-        rpi_flat = ttnn.reshape(rpi, [-1], memory_config=self.memory_config)
-        relative_position_bias = ttnn.embedding(
-            rpi_flat, self.relative_position_bias_table, memory_config=self.memory_config
-        )
-        relative_position_bias = ttnn.reshape(
-            relative_position_bias, [window_area, window_area, self.num_heads], memory_config=self.memory_config
-        )
-        relative_position_bias = ttnn.permute(
-            relative_position_bias, [2, 0, 1], memory_config=self.memory_config
-        )  # [num_heads, window_area, window_area]
+        # rpi_flat = ttnn.reshape(rpi, [-1], memory_config=self.memory_config)
+        # relative_position_bias = ttnn.embedding(
+        #     rpi_flat, self.relative_position_bias_table, memory_config=self.memory_config
+        # )
+        # relative_position_bias = ttnn.reshape(
+        #     relative_position_bias, [window_area, window_area, self.num_heads], memory_config=self.memory_config
+        # )
+        # relative_position_bias = ttnn.permute(
+        #     relative_position_bias, [2, 0, 1], memory_config=self.memory_config
+        # )  # [num_heads, window_area, window_area]
 
-        # Add bias to attention
-        relative_position_bias = ttnn.unsqueeze(relative_position_bias, 0)  # [1, num_heads, window_area, window_area]
-        attn = ttnn.add(attn, relative_position_bias, memory_config=self.memory_config)
+        # # Add bias to attention
+        # relative_position_bias = ttnn.unsqueeze(relative_position_bias, 0)  # [1, num_heads, window_area, window_area]
+        attn = ttnn.add(attn, self.relative_position_bias, memory_config=self.memory_config)
 
         # Apply mask if provided
         if mask is not None:

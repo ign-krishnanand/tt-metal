@@ -17,14 +17,14 @@ from models.utility_functions import comp_pcc
 from ttnn.model_preprocessing import preprocess_model_parameters
 
 
-def create_rhag_preprocessor(device, depth):
+def create_rhag_preprocessor(device, depth, window_size, rpi_sa):
     """Preprocessor for RHAG that handles all sub-components by importing existing preprocessors"""
 
     def custom_preprocessor(torch_model, name, ttnn_module_args):
         params = {}
 
         # Import and use AttenBlocks preprocessor
-        atten_blocks_preprocessor = create_atten_blocks_preprocessor(device, depth)
+        atten_blocks_preprocessor = create_atten_blocks_preprocessor(device, depth, window_size, rpi_sa)
         params["residual_group"] = atten_blocks_preprocessor(
             torch_model.residual_group, "residual_group", ttnn_module_args
         )
@@ -161,7 +161,7 @@ def test_rhag(
     # parameters = preprocess_model_parameters(
     parameters = preprocess_model_parameters(
         initialize_model=lambda: ref_model,
-        custom_preprocessor=create_rhag_preprocessor(device, depth),
+        custom_preprocessor=create_rhag_preprocessor(device, depth, window_size, rpi_sa),
         device=device,
     )
 

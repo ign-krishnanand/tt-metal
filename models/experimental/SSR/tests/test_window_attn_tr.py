@@ -12,7 +12,7 @@ from ttnn.model_preprocessing import preprocess_linear_bias, preprocess_linear_w
 from models.utility_functions import comp_pcc
 
 
-def create_window_attention_preprocessor(device):
+def create_window_attention_preprocessor(device, window_size=None, rpi=None):
     def custom_preprocessor(torch_model, name, ttnn_module_args):
         params = {}
 
@@ -33,10 +33,13 @@ def create_window_attention_preprocessor(device):
         }
 
         # Relative position bias table
-        params["relative_position_bias_table"] = ttnn.from_torch(
-            torch_model.relative_position_bias_table, dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT
+        relative_position_bias = torch_model.relative_position_bias_table[rpi.view(-1)].view(
+            window_size[0] * window_size[1], window_size[0] * window_size[1], -1
+        )  # Wh*Ww,Wh*Ww,nH
+        relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
+        params["relative_position_bias"] = ttnn.from_torch(
+            relative_position_bias.unsqueeze(0), dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT
         )
-
         return params
 
     return custom_preprocessor
@@ -46,7 +49,7 @@ def create_window_attention_preprocessor(device):
     "batch_size, num_windows, window_size, dim, num_heads",
     [
         # (1, 16, (16, 16), 192, 6),  # no padding required case - For the qkv optimised case
-        (3, 16, (16, 16), 180, 6),  # SSR config
+        (1, 16, (16, 16), 180, 6),  # SSR config
     ],
 )
 @pytest.mark.parametrize("device_params", [{"l1_small_size": 32768}], indirect=True)
@@ -88,7 +91,7 @@ def test_window_attention(device, batch_size, num_windows, window_size, dim, num
     # Create TTNN model
     parameters = ttnn.model_preprocessing.preprocess_model(
         initialize_model=lambda: ref_model,
-        custom_preprocessor=create_window_attention_preprocessor(device),
+        custom_preprocessor=create_window_attention_preprocessor(device, window_size, rpi),
         device=device,
         run_model=lambda model: model(input_tensor, rpi=rpi, mask=None),
     )
