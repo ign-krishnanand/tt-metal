@@ -63,6 +63,7 @@ def create_patch_merging_preprocessor(device):
         (3, (8, 8), 1536),  # Custom resolution
     ],
 )
+@pytest.mark.parametrize("device_params", [{"l1_small_size": 32768}])
 def test_patch_merging(device, batch_size, input_resolution, dim):
     torch.manual_seed(0)
 

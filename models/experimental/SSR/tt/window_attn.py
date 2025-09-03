@@ -143,13 +143,7 @@ class TTWindowAttention(nn.Module):
         ttnn.deallocate(v)
         ttnn.deallocate(attn)
 
-        # Reshape output
-        output_tensor = ttnn.permute(
-            output_tensor,
-            (0, 2, 1, 3),
-            memory_config=ttnn.L1_MEMORY_CONFIG if B_ * N * C < 5_000_000 else ttnn.DRAM_MEMORY_CONFIG,
-        )
-        output_tensor = ttnn.reshape(output_tensor, (B_, N, C), memory_config=ttnn.L1_MEMORY_CONFIG)
+        output_tensor = ttnn.transformer.concatenate_heads(output_tensor, memory_config=ttnn.L1_MEMORY_CONFIG)
 
         # Apply projection
         proj_weight = self.parameters["proj"]["weight"]
