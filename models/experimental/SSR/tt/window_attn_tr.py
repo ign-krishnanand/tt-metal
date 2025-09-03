@@ -137,21 +137,51 @@ class TTWindowAttentionTR(LightweightModule):
             core_grid=ttnn.CoreGrid(y=8, x=8),
         )  # [b_, num_heads, n, head_dim]
 
+        # import pdb; pdb.set_trace()
         # Transpose and reshape back
-        x = ttnn.transpose(x, 1, 2, memory_config=self.memory_config)  # [b_, n, num_heads, head_dim]
-        x = ttnn.reshape(x, [b_, n, c], memory_config=self.memory_config)
+        # x = ttnn.transpose(x, 1, 2, memory_config=self.memory_config)  # [b_, n, num_heads, head_dim]
+        # x = ttnn.reshape(x, [b_, n, c], memory_config=self.memory_config)
 
         # x = ttnn.pad(x, ((0, 0), (0, 0), (0, 0), (0, 2)), value=0.0)
-        # TODO: fix this
-        # x = ttnn.transformer.concatenate_heads(
-        #     x,
-        #     memory_config=self.memory_config
-        # )
-        # original_final_dim = 6 * 30  # 180 in your case
+        # # TODO: fix this
+        # x = ttnn.transformer.concatenate_heads( x, memory_config=self.memory_config)
+        # original_final_dim = 180
         # start_indices = [0, 0, 0]
         # end_indices = [x.shape[0], x.shape[1], original_final_dim]
         # x = ttnn.slice(x, start_indices, end_indices, memory_config=self.memory_config)
         # program_config = matmul_config(x.shape[-2], x.shape[-1], self.proj_bias.shape[-1])
+
+        # TODO: find a better way to do padding, maybe pad the weights of the prev matmul
+        if pad:
+            x = ttnn.to_torch(x)
+            padded_head_size = 32
+            head_size = 30
+
+            x = torch.nn.functional.pad(x, (0, padded_head_size - head_size), "constant", 0)
+            input_tensor = ttnn.from_torch(
+                x,
+                device=self.device,
+                dtype=ttnn.bfloat16,
+                memory_config=self.memory_config,
+                layout=ttnn.TILE_LAYOUT,
+            )
+        output_tensor = ttnn.transformer.concatenate_heads(input_tensor)
+
+        if pad:
+            output_tensor = ttnn.to_torch(output_tensor)
+
+            # Remove the padding
+            output_tensor = torch.cat(
+                [chunk[..., :head_size] for chunk in torch.split(output_tensor, padded_head_size, dim=-1)], dim=-1
+            )
+        x = ttnn.from_torch(
+            output_tensor,
+            device=self.device,
+            dtype=ttnn.bfloat16,
+            memory_config=self.memory_config,
+            layout=ttnn.TILE_LAYOUT,
+        )
+
         x = ttnn.linear(
             x,
             self.proj_weight,
