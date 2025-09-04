@@ -1053,7 +1053,6 @@ class TTOCAB(LightweightModule):
 
         # B, H, W, C = q.shape
         # num_windows = (H // self.window_size) * (W // self.window_size)
-        q_windows = ttnn.reshape(q, (-1, self.window_size * self.window_size, c), memory_config=ttnn.L1_MEMORY_CONFIG)
 
         torch_unfold = True
         # return q_windows
@@ -1074,16 +1073,23 @@ class TTOCAB(LightweightModule):
             )  # b, c*w*w, nw
 
         # Rearrange KV windows using host implementation
-        kv_windows = self.ttnn_rearrange(
-            kv_windows,
-            "b (nc ch owh oww) nw",
-            "nc (b nw) (owh oww) ch",
-            nc=2,
-            ch=c,
-            owh=self.overlap_win_size,
-            oww=self.overlap_win_size,
-        )
-        print("KV: ", kv_windows.shape)
+        # kv_windows = self.ttnn_rearrange(
+        #     kv_windows,
+        #     "b (nc ch owh oww) nw",
+        #     "nc (b nw) (owh oww) ch",
+        #     nc=2,
+        #     ch=c,
+        #     owh=self.overlap_win_size,
+        #     oww=self.overlap_win_size,
+        # )
+
+        b, combined_dim, nw = kv_windows.shape
+        nc, ch, owh, oww = 2, c, self.overlap_win_size, self.overlap_win_size
+        reshaped = ttnn.reshape(kv_windows, (b, nc, ch, owh, oww, nw))
+        # Permute to desired order: nc, b, nw, ch, owh, oww
+        permuted = ttnn.permute(reshaped, (1, 0, 5, 2, 3, 4))
+        # Final reshape
+        kv_windows = ttnn.reshape(permuted, (nc, b * nw, owh * oww, ch), memory_config=ttnn.L1_MEMORY_CONFIG)
         # Split K and V windows
         k_windows = ttnn.slice(
             kv_windows, (0, 0, 0, 0), (1, kv_windows.shape[1], kv_windows.shape[2], kv_windows.shape[3])
@@ -1096,6 +1102,7 @@ class TTOCAB(LightweightModule):
         ttnn.deallocate(kv_windows)
         v_windows = ttnn.squeeze(v_windows, 0)
 
+        q_windows = ttnn.reshape(q, (-1, self.window_size * self.window_size, c), memory_config=ttnn.L1_MEMORY_CONFIG)
         # Multi-head attention computation
         b_, nq, _ = q_windows.shape
         _, n, _ = k_windows.shape
