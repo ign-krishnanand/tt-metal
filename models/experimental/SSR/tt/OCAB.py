@@ -685,6 +685,7 @@ class TTOCAB(LightweightModule):
         kh, kw = kernel_size
         stride_h, stride_w = stride
         pad_h, pad_w = padding
+        input_tensor = ttnn.to_memory_config(input_tensor, memory_config=ttnn.L1_MEMORY_CONFIG)
         # input_tensor = ttnn.to_memory_config(input_tensor, memory_config=ttnn.L1_MEMORY_CONFIG)
         # Ensure tensor is in ROW_MAJOR layout for padding
         if input_tensor.layout != ttnn.ROW_MAJOR_LAYOUT:
@@ -707,14 +708,17 @@ class TTOCAB(LightweightModule):
                 # Reshape patch to flatten spatial dimensions
                 # patch = ttnn.reshape(patch, (batch_size, channels * kh * kw, 1))
                 patches_list.append(patch)
+                # patch.deallocate()
 
+        ttnn.deallocate(input_tensor)
         # Concatenate all patches along the last dimension
         if len(patches_list) > 1:
             # import pdb; pdb.set_trace()
-            output = ttnn.concat(patches_list, dim=-1, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            output = ttnn.concat(patches_list, dim=-1, memory_config=ttnn.L1_MEMORY_CONFIG)
         else:
             output = patches_list[0]
 
+        # ttnn.deallocate(patches_list)
         return output
 
     def ttnn_rearrange(self, tensor, pattern_from, pattern_to, **kwargs):
