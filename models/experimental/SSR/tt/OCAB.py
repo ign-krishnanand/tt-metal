@@ -886,7 +886,7 @@ class TTOCAB(LightweightModule):
         # attn = ttnn.add(attn, relative_position_bias)
 
         # Apply softmax
-        # attn = ttnn.softmax(attn, dim=-1)
+        attn = ttnn.softmax(attn, dim=-1)
 
         # Apply attention to values
         attn_output = ttnn.matmul(
@@ -910,13 +910,9 @@ class TTOCAB(LightweightModule):
         )
         ttnn.deallocate(attn)
         ttnn.deallocate(v)
-        attn_output = ttnn.transpose(attn_output, 1, 2)
-        attn_output = ttnn.reshape(attn_output, (b_, nq, self.dim))
 
-        # Merge windows
-        attn_windows = ttnn.reshape(attn_output, (-1, self.window_size, self.window_size, self.dim))
-        x = self.window_reverse_ttnn(attn_windows, self.window_size, h, w)
-        x = ttnn.reshape(x, (b, h * w, self.dim))
+        attn_output = ttnn.transpose(attn_output, 1, 2)
+        x = ttnn.reshape(attn_output, (b, h * w, self.dim))
 
         # Projection and residual connection
         x = ttnn.linear(
@@ -1003,11 +999,6 @@ class TTOCAB(LightweightModule):
         # Layer normalization - handle padded dimensions
         x = ttnn.layer_norm(x, weight=self.norm1_weight, bias=self.norm1_bias, memory_config=ttnn.L1_MEMORY_CONFIG)
 
-        # x= ttnn.to_layout(x, ttnn.ROW_MAJOR_LAYOUT)
-
-        # Reshape to spatial format
-        # x = ttnn.reshape(x, (b, h, w, c), memory_config=ttnn.L1_MEMORY_CONFIG)
-
         # QKV projection
         qkv = ttnn.linear(
             x,
@@ -1036,23 +1027,7 @@ class TTOCAB(LightweightModule):
         q = ttnn.slice(qkv, (0, 0, 0, 0, 0), (1, b, c, h, w))
         q = ttnn.squeeze(q, 0)  # Remove first dimension
         q = ttnn.permute(q, (0, 2, 3, 1))  # b, h, w, c
-
-        # k = ttnn.slice(qkv, (1, 0, 0, 0, 0), (2, b, c, h, w))
-        # k = ttnn.squeeze(k, 0)
-
-        # v = ttnn.slice(qkv, (2, 0, 0, 0, 0), (3, b, c, h, w))
-        # ttnn.deallocate(qkv)
-        # v = ttnn.squeeze(v, 0)
-
-        # Concatenate K and V for unfold operation
-        # kv = ttnn.concat([k, v], dim=1)  # b, 2*c, h, w
         kv = ttnn.concat((qkv[1], qkv[2]), dim=1)  # b, 2*c, h, w
-
-        # Window partition for Q
-        # q_windows = self.window_partition_ttnn(q, self.window_size)
-
-        # B, H, W, C = q.shape
-        # num_windows = (H // self.window_size) * (W // self.window_size)
 
         torch_unfold = True
         # return q_windows
@@ -1066,31 +1041,16 @@ class TTOCAB(LightweightModule):
                 device=self.device,
                 memory_config=ttnn.DRAM_MEMORY_CONFIG,
             )
-
         else:
             kv_windows = self.ttnn_manual_unfold(
                 kv, kernel_size=(self.overlap_win_size, self.overlap_win_size), stride=self.window_size, padding=4
             )  # b, c*w*w, nw
 
-        # Rearrange KV windows using host implementation
-        # kv_windows = self.ttnn_rearrange(
-        #     kv_windows,
-        #     "b (nc ch owh oww) nw",
-        #     "nc (b nw) (owh oww) ch",
-        #     nc=2,
-        #     ch=c,
-        #     owh=self.overlap_win_size,
-        #     oww=self.overlap_win_size,
-        # )
-
-        b, combined_dim, nw = kv_windows.shape
+        # Simplified rearrangement of kv_windows for K and V splitting
         nc, ch, owh, oww = 2, c, self.overlap_win_size, self.overlap_win_size
-        reshaped = ttnn.reshape(kv_windows, (b, nc, ch, owh, oww, nw))
-        # Permute to desired order: nc, b, nw, ch, owh, oww
-        permuted = ttnn.permute(reshaped, (1, 0, 5, 2, 3, 4))
-        # Final reshape
-        kv_windows = ttnn.reshape(permuted, (nc, b * nw, owh * oww, ch), memory_config=ttnn.L1_MEMORY_CONFIG)
+        kv_windows = ttnn.reshape(kv_windows, (nc, -1, owh * oww, ch), memory_config=ttnn.L1_MEMORY_CONFIG)
         # Split K and V windows
+
         k_windows = ttnn.slice(
             kv_windows, (0, 0, 0, 0), (1, kv_windows.shape[1], kv_windows.shape[2], kv_windows.shape[3])
         )
@@ -1101,19 +1061,17 @@ class TTOCAB(LightweightModule):
         )
         ttnn.deallocate(kv_windows)
         v_windows = ttnn.squeeze(v_windows, 0)
-
-        q_windows = ttnn.reshape(q, (-1, self.window_size * self.window_size, c), memory_config=ttnn.L1_MEMORY_CONFIG)
-        # Multi-head attention computation
-        b_, nq, _ = q_windows.shape
         _, n, _ = k_windows.shape
         d = self.dim // self.num_heads
 
-        # Reshape for multi-head attention
-        q = ttnn.reshape(q_windows, (b_, nq, self.num_heads, d), memory_config=ttnn.L1_MEMORY_CONFIG)
-        print("Q:", q.shape)
-        ttnn.deallocate(q_windows)
+        # Simplified q processing for multi-head attention
+        q = ttnn.reshape(
+            q, (-1, self.window_size * self.window_size, self.num_heads, d), memory_config=ttnn.L1_MEMORY_CONFIG
+        )
         q = ttnn.permute(q, (0, 2, 1, 3))  # nw*b, nH, nq, d
 
+        # Reshape for multi-head attention
+        b_ = 16
         k = ttnn.reshape(k_windows, (b_, n, self.num_heads, d), memory_config=ttnn.L1_MEMORY_CONFIG)
         print("K:", k.shape)
         k = ttnn.permute(k, (0, 2, 1, 3))  # nw*b, nH, n, d
@@ -1139,10 +1097,9 @@ class TTOCAB(LightweightModule):
             compute_kernel_config=None,
             program_config=None,
         )
-        # Merge windows
-        attn_windows = ttnn.reshape(attn_output, (-1, self.window_size, self.window_size, self.dim))
-        x = self.window_reverse_ttnn(attn_windows, self.window_size, h, w)
-        x = ttnn.reshape(x, (b, h * w, self.dim))
+
+        attn_output = ttnn.transpose(attn_output, 1, 2)
+        x = ttnn.reshape(attn_output, (b, h * w, self.dim))
 
         # Projection and residual connection
         x = ttnn.linear(
