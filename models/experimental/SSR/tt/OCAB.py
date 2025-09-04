@@ -710,6 +710,7 @@ class TTOCAB(LightweightModule):
                 patches_list.append(patch)
                 # patch.deallocate()
 
+        # ttnn.deallocate(patch)
         ttnn.deallocate(input_tensor)
         # Concatenate all patches along the last dimension
         if len(patches_list) > 1:
@@ -717,8 +718,7 @@ class TTOCAB(LightweightModule):
             output = ttnn.concat(patches_list, dim=-1, memory_config=ttnn.L1_MEMORY_CONFIG)
         else:
             output = patches_list[0]
-
-        # ttnn.deallocate(patches_list)
+        # ttnn.deallocate(patches_list[0])
         return output
 
     def ttnn_rearrange(self, tensor, pattern_from, pattern_to, **kwargs):
@@ -1055,34 +1055,111 @@ class TTOCAB(LightweightModule):
                 kv, kernel_size=(self.overlap_win_size, self.overlap_win_size), stride=self.window_size, padding=4
             )  # b, c*w*w, nw
 
-        kv_windows = ttnn.to_memory_config(kv_windows, memory_config=ttnn.L1_MEMORY_CONFIG)
+        # kv_windows = ttnn.to_memory_config(kv_windows, memory_config=ttnn.L1_MEMORY_CONFIG)
         # Simplified rearrangement of kv_windows for K and V splitting
-        nc, ch, owh, oww = 2, c, self.overlap_win_size, self.overlap_win_size
+        # nc, ch, owh, oww = 2, c, self.overlap_win_size, self.overlap_win_size
         n = 576
         # Reshape and split kv_windows into k and v, then permute for attention
         kv_windows = ttnn.reshape(kv_windows, (2, b_, n, self.num_heads, d), memory_config=ttnn.L1_MEMORY_CONFIG)
+        # kv_windows = ttnn.permute(kv_windows, (0, 1, 3, 2,4))  # nw*b, nH, n, d
         k, v = kv_windows[0], kv_windows[1]
         k = ttnn.permute(k, (0, 2, 1, 3))  # nw*b, nH, n, d
         v = ttnn.permute(v, (0, 2, 1, 3))  # nw*b, nH, n, d
-
+        # v = ttnn.permute(v, (0, 1, 3, 2,4))  # nw*b, nH, n, d
+        # ttnn.deallocate(kv_windows)
         q = ttnn.to_layout(q, ttnn.TILE_LAYOUT)
         k = ttnn.to_layout(k, ttnn.TILE_LAYOUT)
         v = ttnn.to_layout(v, ttnn.TILE_LAYOUT)
-        q = ttnn.to_memory_config(q, memory_config=ttnn.DRAM_MEMORY_CONFIG)
-        k = ttnn.to_memory_config(k, memory_config=ttnn.DRAM_MEMORY_CONFIG)
-        v = ttnn.to_memory_config(v, memory_config=ttnn.DRAM_MEMORY_CONFIG)
 
-        attn_output = ttnn.transformer.scaled_dot_product_attention(
-            q,
-            k,
-            v,
-            is_causal=False,
-            attn_mask=None,
-            scale=self.scale,
-            compute_kernel_config=None,
-            program_config=None,
-            # memory_config=ttnn.L1_MEMORY_CONFIG,
-        )
+        if 1:
+            q_n = 256
+            q_chunk_size = 128 if q_n % 128 == 0 else 32
+            k_chunk_size = 512 if n % 512 == 0 else 128 if n % 128 == 0 else 32
+
+            pc_sdpa = ttnn.SDPAProgramConfig(
+                compute_with_storage_grid_size=[8, 7],
+                q_chunk_size=q_chunk_size,
+                k_chunk_size=k_chunk_size,
+                exp_approx_mode=False,
+            )
+            compute_kernel_config = ttnn.init_device_compute_kernel_config(
+                self.device.arch(),
+                math_fidelity=ttnn.MathFidelity.HiFi2,
+                math_approx_mode=False,
+                fp32_dest_acc_en=True,
+                packer_l1_acc=False,
+            )
+
+            # q = ttnn.typecast(q, dtype= ttnn.bfloat8_b)
+            # k = ttnn.typecast(k, dtype= ttnn.bfloat8_b)
+            # v = ttnn.typecast(v, dtype= ttnn.bfloat8_b)
+            q = ttnn.to_memory_config(q, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            k = ttnn.to_memory_config(k, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            v = ttnn.to_memory_config(v, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+            attn_output = ttnn.transformer.scaled_dot_product_attention(
+                q,
+                k,
+                v,
+                is_causal=False,
+                attn_mask=None,
+                scale=self.scale,
+                compute_kernel_config=compute_kernel_config,
+                program_config=pc_sdpa,
+                # memory_config=ttnn.L1_MEMORY_CONFIG,
+            )
+        else:
+            # Scale queries
+            q = ttnn.multiply(q, self.scale, memory_config=ttnn.L1_MEMORY_CONFIG)
+
+            # Attention computation
+            k_transposed = ttnn.transpose(k, -2, -1, memory_config=ttnn.L1_MEMORY_CONFIG)
+            attn = ttnn.matmul(
+                q,
+                k_transposed,
+                memory_config=ttnn.L1_MEMORY_CONFIG,
+                program_config=ttnn.MatmulMultiCoreReuseMultiCastProgramConfig(
+                    compute_with_storage_grid_size=(8, 8),
+                    in0_block_w=1,
+                    out_subblock_h=1,
+                    out_subblock_w=2,
+                    out_block_h=16,
+                    out_block_w=4,
+                    per_core_M=96,  # Increased from 16 to reduce num_blocks_y to 8
+                    per_core_N=4,
+                    transpose_mcast=False,
+                    fused_activation=None,
+                    fuse_batch=True,
+                ),
+                compute_kernel_config=self.compute_kernel_config,
+            )
+            ttnn.deallocate(k_transposed)
+            ttnn.deallocate(q)
+
+            # Apply softmax
+            attn = ttnn.softmax(attn, dim=-1)
+
+            # Apply attention to values
+            attn_output = ttnn.matmul(
+                attn,
+                v,
+                memory_config=ttnn.L1_MEMORY_CONFIG,
+                program_config=ttnn.MatmulMultiCoreReuseMultiCastProgramConfig(
+                    compute_with_storage_grid_size=(8, 8),
+                    in0_block_w=2,
+                    out_subblock_h=1,
+                    out_subblock_w=2,
+                    out_block_h=16,
+                    out_block_w=4,
+                    per_core_M=96,  # Increased from 16 to reduce num_blocks_y to 8
+                    per_core_N=4,
+                    transpose_mcast=False,
+                    fused_activation=None,
+                    fuse_batch=True,
+                ),
+                compute_kernel_config=self.compute_kernel_config,
+            )
+            ttnn.deallocate(attn)
+            ttnn.deallocate(v)
 
         attn_output = ttnn.transpose(attn_output, 1, 2, memory_config=ttnn.L1_MEMORY_CONFIG)
         x = ttnn.reshape(attn_output, (b, h * w, self.dim), memory_config=ttnn.L1_MEMORY_CONFIG)
@@ -1132,9 +1209,10 @@ class TTOCAB(LightweightModule):
                 fused_activation=None,
                 fuse_batch=True,
             ),
+            activation="gelu",
             compute_kernel_config=self.compute_kernel_config,
         )
-        mlp_out = ttnn.gelu(mlp_out, memory_config=ttnn.L1_MEMORY_CONFIG)
+        # mlp_out = ttnn.gelu(mlp_out, memory_config=ttnn.L1_MEMORY_CONFIG)
         mlp_out = ttnn.linear(
             mlp_out,
             self.mlp_fc2_weight,
