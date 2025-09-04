@@ -995,6 +995,8 @@ class TTOCAB(LightweightModule):
         # Store shortcut connection
         shortcut = x
         # shortcut = ttnn.reallocate(shortcut, memory_config=ttnn.DRAM_MEMORY_CONFIG)
+        d = self.dim // self.num_heads
+        b_ = 16
 
         # Layer normalization - handle padded dimensions
         x = ttnn.layer_norm(x, weight=self.norm1_weight, bias=self.norm1_bias, memory_config=ttnn.L1_MEMORY_CONFIG)
@@ -1023,10 +1025,13 @@ class TTOCAB(LightweightModule):
         qkv = ttnn.reshape(qkv, (b, h, w, 3, c), memory_config=ttnn.L1_MEMORY_CONFIG)
         qkv = ttnn.permute(qkv, (3, 0, 4, 1, 2))  # 3, b, c, h, w
 
-        # Split Q, K, V using slicing
-        q = ttnn.slice(qkv, (0, 0, 0, 0, 0), (1, b, c, h, w))
-        q = ttnn.squeeze(q, 0)  # Remove first dimension
-        q = ttnn.permute(q, (0, 2, 3, 1))  # b, h, w, c
+        # Simplified Q extraction and processing
+        q = ttnn.squeeze(ttnn.slice(qkv, (0, 0, 0, 0, 0), (1, b, c, h, w)), 0)
+        q = ttnn.reshape(
+            q, (-1, self.window_size * self.window_size, self.num_heads, d), memory_config=ttnn.L1_MEMORY_CONFIG
+        )
+        q = ttnn.permute(q, (0, 2, 1, 3))  # nw*b, nH, nq, d
+
         kv = ttnn.concat((qkv[1], qkv[2]), dim=1)  # b, 2*c, h, w
 
         torch_unfold = True
@@ -1061,23 +1066,14 @@ class TTOCAB(LightweightModule):
         )
         ttnn.deallocate(kv_windows)
         v_windows = ttnn.squeeze(v_windows, 0)
-        _, n, _ = k_windows.shape
-        d = self.dim // self.num_heads
 
-        # Simplified q processing for multi-head attention
-        q = ttnn.reshape(
-            q, (-1, self.window_size * self.window_size, self.num_heads, d), memory_config=ttnn.L1_MEMORY_CONFIG
-        )
-        q = ttnn.permute(q, (0, 2, 1, 3))  # nw*b, nH, nq, d
+        _, n, _ = k_windows.shape
 
         # Reshape for multi-head attention
-        b_ = 16
         k = ttnn.reshape(k_windows, (b_, n, self.num_heads, d), memory_config=ttnn.L1_MEMORY_CONFIG)
-        print("K:", k.shape)
         k = ttnn.permute(k, (0, 2, 1, 3))  # nw*b, nH, n, d
 
         v = ttnn.reshape(v_windows, (b_, n, self.num_heads, d), memory_config=ttnn.L1_MEMORY_CONFIG)
-        print("V:", v.shape)
         v = ttnn.permute(v, (0, 2, 1, 3))  # nw*b, nH, n, d
 
         q = ttnn.to_layout(q, ttnn.TILE_LAYOUT)
