@@ -1051,9 +1051,10 @@ class TTOCAB(LightweightModule):
                 kv, kernel_size=(self.overlap_win_size, self.overlap_win_size), stride=self.window_size, padding=4
             )  # b, c*w*w, nw
 
+        kv_windows = ttnn.to_memory_config(kv_windows, memory_config=ttnn.L1_MEMORY_CONFIG)
         # Simplified rearrangement of kv_windows for K and V splitting
         nc, ch, owh, oww = 2, c, self.overlap_win_size, self.overlap_win_size
-        kv_windows = ttnn.reshape(kv_windows, (nc, -1, owh * oww, ch), memory_config=ttnn.L1_MEMORY_CONFIG)
+        kv_windows = ttnn.tt - oe(kv_windows, (nc, -1, owh * oww, ch), memory_config=ttnn.L1_MEMORY_CONFIG)
         # Split K and V windows
 
         k_windows = ttnn.slice(
@@ -1092,10 +1093,11 @@ class TTOCAB(LightweightModule):
             scale=self.scale,
             compute_kernel_config=None,
             program_config=None,
+            # memory_config=ttnn.L1_MEMORY_CONFIG,
         )
 
-        attn_output = ttnn.transpose(attn_output, 1, 2)
-        x = ttnn.reshape(attn_output, (b, h * w, self.dim))
+        attn_output = ttnn.transpose(attn_output, 1, 2, memory_config=ttnn.L1_MEMORY_CONFIG)
+        x = ttnn.reshape(attn_output, (b, h * w, self.dim), memory_config=ttnn.L1_MEMORY_CONFIG)
 
         # Projection and residual connection
         x = ttnn.linear(
