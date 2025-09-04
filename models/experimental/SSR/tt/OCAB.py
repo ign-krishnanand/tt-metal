@@ -1054,7 +1054,7 @@ class TTOCAB(LightweightModule):
         kv_windows = ttnn.to_memory_config(kv_windows, memory_config=ttnn.L1_MEMORY_CONFIG)
         # Simplified rearrangement of kv_windows for K and V splitting
         nc, ch, owh, oww = 2, c, self.overlap_win_size, self.overlap_win_size
-        kv_windows = ttnn.tt - oe(kv_windows, (nc, -1, owh * oww, ch), memory_config=ttnn.L1_MEMORY_CONFIG)
+        kv_windows = ttnn.reshape(kv_windows, (nc, -1, owh * oww, ch), memory_config=ttnn.L1_MEMORY_CONFIG)
         # Split K and V windows
 
         k_windows = ttnn.slice(
