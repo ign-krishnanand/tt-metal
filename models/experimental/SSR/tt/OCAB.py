@@ -608,6 +608,7 @@
 
 import ttnn
 from models.common.lightweightmodule import LightweightModule
+import torch.nn as nn
 
 
 class TTOCAB(LightweightModule):
@@ -661,6 +662,11 @@ class TTOCAB(LightweightModule):
             math_approx_mode=False,
             fp32_dest_acc_en=False,
             packer_l1_acc=True,
+        )
+        self.unfold = nn.Unfold(
+            kernel_size=(self.overlap_win_size, self.overlap_win_size),
+            stride=self.window_size,
+            padding=4,
         )
 
     def ttnn_manual_unfold(self, input_tensor, kernel_size, stride, padding):
@@ -1047,11 +1053,23 @@ class TTOCAB(LightweightModule):
             q_windows, (-1, self.window_size * self.window_size, c), memory_config=ttnn.DRAM_MEMORY_CONFIG
         )
 
+        torch_unfold = True
         # return q_windows
+        if torch_unfold:
+            kv_torch = ttnn.to_torch(kv)
+            kv_windows_torch = self.unfold(kv_torch)  # b, c*w*w, nw
+            kv_windows = ttnn.from_torch(
+                kv_windows_torch,
+                dtype=kv.dtype,
+                layout=ttnn.ROW_MAJOR_LAYOUT,
+                device=self.device,
+                memory_config=ttnn.DRAM_MEMORY_CONFIG,
+            )
 
-        kv_windows = self.ttnn_manual_unfold(
-            kv, kernel_size=(self.overlap_win_size, self.overlap_win_size), stride=self.window_size, padding=4
-        )  # b, c*w*w, nw
+        else:
+            kv_windows = self.ttnn_manual_unfold(
+                kv, kernel_size=(self.overlap_win_size, self.overlap_win_size), stride=self.window_size, padding=4
+            )  # b, c*w*w, nw
 
         # Rearrange KV windows using host implementation
         kv_windows = self.ttnn_rearrange(
