@@ -1054,27 +1054,11 @@ class TTOCAB(LightweightModule):
         kv_windows = ttnn.to_memory_config(kv_windows, memory_config=ttnn.L1_MEMORY_CONFIG)
         # Simplified rearrangement of kv_windows for K and V splitting
         nc, ch, owh, oww = 2, c, self.overlap_win_size, self.overlap_win_size
-        kv_windows = ttnn.reshape(kv_windows, (nc, -1, owh * oww, ch), memory_config=ttnn.L1_MEMORY_CONFIG)
-        # Split K and V windows
-
-        k_windows = ttnn.slice(
-            kv_windows, (0, 0, 0, 0), (1, kv_windows.shape[1], kv_windows.shape[2], kv_windows.shape[3])
-        )
-        k_windows = ttnn.squeeze(k_windows, 0)
-
-        v_windows = ttnn.slice(
-            kv_windows, (1, 0, 0, 0), (2, kv_windows.shape[1], kv_windows.shape[2], kv_windows.shape[3])
-        )
-        ttnn.deallocate(kv_windows)
-        v_windows = ttnn.squeeze(v_windows, 0)
-
-        _, n, _ = k_windows.shape
-
-        # Reshape for multi-head attention
-        k = ttnn.reshape(k_windows, (b_, n, self.num_heads, d), memory_config=ttnn.L1_MEMORY_CONFIG)
+        n = 576
+        # Reshape and split kv_windows into k and v, then permute for attention
+        kv_windows = ttnn.reshape(kv_windows, (2, b_, n, self.num_heads, d), memory_config=ttnn.L1_MEMORY_CONFIG)
+        k, v = kv_windows[0], kv_windows[1]
         k = ttnn.permute(k, (0, 2, 1, 3))  # nw*b, nH, n, d
-
-        v = ttnn.reshape(v_windows, (b_, n, self.num_heads, d), memory_config=ttnn.L1_MEMORY_CONFIG)
         v = ttnn.permute(v, (0, 2, 1, 3))  # nw*b, nH, n, d
 
         q = ttnn.to_layout(q, ttnn.TILE_LAYOUT)
