@@ -685,7 +685,7 @@ class TTOCAB(LightweightModule):
         kh, kw = kernel_size
         stride_h, stride_w = stride
         pad_h, pad_w = padding
-
+        # input_tensor = ttnn.to_memory_config(input_tensor, memory_config=ttnn.L1_MEMORY_CONFIG)
         # Ensure tensor is in ROW_MAJOR layout for padding
         if input_tensor.layout != ttnn.ROW_MAJOR_LAYOUT:
             input_tensor = ttnn.to_layout(input_tensor, ttnn.ROW_MAJOR_LAYOUT)
@@ -705,7 +705,7 @@ class TTOCAB(LightweightModule):
                 # Extract patch using slice
                 patch = ttnn.slice(input_tensor, (0, 0, i, j), (batch_size, channels, i + kh, j + kw))
                 # Reshape patch to flatten spatial dimensions
-                patch = ttnn.reshape(patch, (batch_size, channels * kh * kw, 1))
+                # patch = ttnn.reshape(patch, (batch_size, channels * kh * kw, 1))
                 patches_list.append(patch)
 
         # Concatenate all patches along the last dimension
@@ -1034,7 +1034,7 @@ class TTOCAB(LightweightModule):
 
         kv = ttnn.concat((qkv[1], qkv[2]), dim=1)  # b, 2*c, h, w
 
-        torch_unfold = True
+        torch_unfold = False
         # return q_windows
         if torch_unfold:
             kv_torch = ttnn.to_torch(kv)
