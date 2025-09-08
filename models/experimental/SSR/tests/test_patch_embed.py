@@ -25,7 +25,6 @@ def create_patch_embed_preprocessor(device):
             )
             # Reshape bias to [1, 1, 1, out_channels] format expected by conv2d
             conv_bias_reshaped = conv_bias.reshape(1, 1, 1, -1)
-            # conv_bias_reshaped = conv_bias
             parameters["proj"]["bias"] = ttnn.from_torch(
                 conv_bias_reshaped, dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT
             )
@@ -36,7 +35,6 @@ def create_patch_embed_preprocessor(device):
 
 
 @pytest.mark.parametrize("img_size, ch, patch_size, embed_dim, norm_layer", ((256, 3, 2, 96, None),))
-# @pytest.mark.parametrize("img_size, ch, patch_size, embed_dim, norm_layer", ((256, 3, 4, 96, None),))
 @pytest.mark.parametrize("device_params", [{"l1_small_size": 32768}])
 def test_patch_embed(device, img_size, ch, patch_size, embed_dim, norm_layer):
     input_shape = (3, ch, img_size, img_size)

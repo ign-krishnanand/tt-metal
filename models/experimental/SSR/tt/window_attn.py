@@ -14,8 +14,6 @@ class TTWindowAttention(nn.Module):
         dim,
         window_size,
         num_heads,
-        qkv_bias: bool = True,
-        proj_bias: bool = True,
     ):
         super().__init__()
         self.parameters = parameters
@@ -71,7 +69,6 @@ class TTWindowAttention(nn.Module):
         qkv_weight = self.parameters["qkv"]["weight"]
         qkv_bias = self.parameters["qkv"]["bias"]
 
-        # qkv_program_config = matmul_config(input_tensor.shape[-2], input_tensor.shape[-1], qkv_bias.shape[-1], (8, 8))
         qkv = ttnn.linear(
             input_tensor,
             qkv_weight,
@@ -80,12 +77,9 @@ class TTWindowAttention(nn.Module):
                 math_fidelity=ttnn.MathFidelity.LoFi,
             ),
             memory_config=ttnn.L1_MEMORY_CONFIG if B_ * N * C < 1_100_000 else ttnn.DRAM_MEMORY_CONFIG,
-            # program_config=qkv_program_config,
             core_grid=ttnn.CoreGrid(x=8, y=8),
         )
         ttnn.deallocate(input_tensor)
-
-        # Reshape and permute QKV
 
         # Split QKV using built-in function
         (
@@ -149,9 +143,6 @@ class TTWindowAttention(nn.Module):
         proj_weight = self.parameters["proj"]["weight"]
         proj_bias = self.parameters["proj"]["bias"]
 
-        # output_matmul_program_config = matmul_config(
-        #     output_tensor.shape[-2], output_tensor.shape[-1], proj_bias.shape[-1], (8, 8)
-        # )
         output_tensor = ttnn.linear(
             output_tensor,
             proj_weight,

@@ -36,7 +36,6 @@ class TTPatchEmbed(LightweightModule):
         self.embed_dim = embed_dim
         self.device = device
         self.dtype = dtype
-        # self.memory_config = ttnn.DRAM_MEMORY_CONFIG
         self.memory_config = ttnn.L1_MEMORY_CONFIG
         # Store projection parameters (weight and bias)
         self.proj_weight = parameters["proj"]["weight"]
@@ -59,7 +58,7 @@ class TTPatchEmbed(LightweightModule):
             act_block_h_override=64,  # Use smaller activation blocks
         )
 
-    def forward(self, x, config=None):
+    def forward(self, x):
         batch_size, img_h, img_w, _ = x.shape  # NHWC format
 
         # Use DRAM slicing for large inputs

@@ -20,7 +20,6 @@ class TTSwinTransformerBlock(LightweightModule):
         window_size=7,
         shift_size=0,
         mlp_ratio=4.0,
-        memory_config=None,
     ):
         super().__init__()
         self.parameters = parameters
@@ -52,7 +51,6 @@ class TTSwinTransformerBlock(LightweightModule):
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = TTMlp(
             device=device,
-            memory_config=memory_config,
             in_features=dim,
             hidden_features=mlp_hidden_dim,
             out_features=dim,
@@ -117,7 +115,6 @@ class TTSwinTransformerBlock(LightweightModule):
             pad_h = (window_size - H % window_size) % window_size
             pad_w = (window_size - W % window_size) % window_size
             if pad_h > 0 or pad_w > 0:
-                # x = ttnn.pad(x, ((0, 0), (0, pad_h), (0, pad_w), (0, 0)))
                 x = ttnn.pad(x, ((0, 0), (0, pad_h), (0, pad_w), (0, 0)), 0.0)
             Hp, Wp = H + pad_h, W + pad_w
 
@@ -152,7 +149,6 @@ class TTSwinTransformerBlock(LightweightModule):
 
         # Store shortcut connection
         shortcut = input_tensor
-        # shortcut = ttnn.to_memory_config(shortcut, ttnn.DRAM_MEMORY_CONFIG)
         shortcut = ttnn.reallocate(shortcut, memory_config=ttnn.DRAM_MEMORY_CONFIG)
 
         # Layer normalization 1

@@ -38,9 +38,6 @@ def create_mlp_preprocessor(device):
 @pytest.mark.parametrize(
     "in_features, hidden_features, out_features, input_shape",
     (
-        # (1536, 3072, 3072, (3, 64, 1536)),  # TTTileSelection -> fea_mlp2
-        # (768, 3072, 3072, (3, 256, 768)),  # TTTileSelection -> fea_mlp1     8898 us
-        # (3072, 96, 96, (3, 256, 3072)),  # TTTileSelection -> mlp1
         (3072, 3072, 3072, (3, 16, 3072)),  # TTTileSelection -> fea_mlp3
         (3072, 96, 96, (3, 16, 3072)),  # TTTileSelection -> mlp3
         (96, 384, 96, (3, 16384, 96)),  # TTSwinTransformerBlock[0], TTSwinTransformerBlock[1] -> mlp
@@ -67,7 +64,6 @@ def test_mlp(device, in_features, hidden_features, out_features, input_shape):
 
     tt_layer = TTMlp(
         device,
-        None,
         in_features=in_features,
         hidden_features=hidden_features,
         out_features=out_features,

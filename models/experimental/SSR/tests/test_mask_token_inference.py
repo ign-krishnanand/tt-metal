@@ -29,14 +29,8 @@ def create_mask_token_inference_preprocessor(device):
             )
 
             # QKV linear layers
-            # parameters["q"] = {}
-            # parameters["k"] = {}
-            # parameters["v"] = {}
             parameters["proj"] = {}
 
-            # parameters["q"]["weight"] = preprocess_linear_weight(torch_model.q.weight, dtype=ttnn.bfloat16)
-            # parameters["k"]["weight"] = preprocess_linear_weight(torch_model.k.weight, dtype=ttnn.bfloat16)
-            # parameters["v"]["weight"] = preprocess_linear_weight(torch_model.v.weight, dtype=ttnn.bfloat16)
             parameters["proj"]["weight"] = preprocess_linear_weight(torch_model.proj.weight, dtype=ttnn.bfloat16)
 
             qkv_weight = torch.cat([torch_model.q.weight, torch_model.k.weight, torch_model.v.weight], dim=0)
@@ -45,10 +39,6 @@ def create_mask_token_inference_preprocessor(device):
             parameters["qkv"]["weight"] = preprocess_linear_weight(qkv_weight, dtype=ttnn.bfloat16)
 
             if torch_model.q.bias is not None:
-                # parameters["q"]["bias"] = preprocess_linear_bias(torch_model.q.bias, dtype=ttnn.bfloat16)
-                # parameters["k"]["bias"] = preprocess_linear_bias(torch_model.k.bias, dtype=ttnn.bfloat16)
-                # parameters["v"]["bias"] = preprocess_linear_bias(torch_model.v.bias, dtype=ttnn.bfloat16)
-
                 qkv_bias = torch.cat([torch_model.q.bias, torch_model.k.bias, torch_model.v.bias], dim=0)
                 parameters["qkv"]["bias"] = preprocess_linear_bias(qkv_bias, dtype=ttnn.bfloat16)
 
@@ -59,55 +49,9 @@ def create_mask_token_inference_preprocessor(device):
     return custom_preprocessor
 
 
-# def create_mask_token_inference_preprocessor(device):
-#     def custom_preprocessor(torch_model, name, ttnn_module_args):
-#         parameters = {}
-#         if (
-#             hasattr(torch_model, "norm")
-#             and hasattr(torch_model, "q")
-#             and hasattr(torch_model, "k")
-#             and hasattr(torch_model, "v")
-#             and hasattr(torch_model, "proj")
-#         ):
-#             # Layer norm parameters
-#             parameters["norm"] = {}
-#             parameters["norm"]["weight"] = ttnn.from_torch(
-#                 torch_model.norm.weight, dtype=ttnn.bfloat16, device=device, layout=ttnn.TILE_LAYOUT
-#             )
-#             parameters["norm"]["bias"] = ttnn.from_torch(
-#                 torch_model.norm.bias, dtype=ttnn.bfloat16, device=device, layout=ttnn.TILE_LAYOUT
-#             )
-
-#             # QKV linear layers
-#             parameters["q"] = {}
-#             parameters["k"] = {}
-#             parameters["v"] = {}
-#             parameters["proj"] = {}
-
-#             parameters["q"]["weight"] = preprocess_linear_weight(torch_model.q.weight, dtype=ttnn.bfloat16)
-#             parameters["k"]["weight"] = preprocess_linear_weight(torch_model.k.weight, dtype=ttnn.bfloat16)
-#             parameters["v"]["weight"] = preprocess_linear_weight(torch_model.v.weight, dtype=ttnn.bfloat16)
-#             parameters["proj"]["weight"] = preprocess_linear_weight(torch_model.proj.weight, dtype=ttnn.bfloat16)
-
-#             if torch_model.q.bias is not None:
-#                 parameters["q"]["bias"] = preprocess_linear_bias(torch_model.q.bias, dtype=ttnn.bfloat16)
-#                 parameters["k"]["bias"] = preprocess_linear_bias(torch_model.k.bias, dtype=ttnn.bfloat16)
-#                 parameters["v"]["bias"] = preprocess_linear_bias(torch_model.v.bias, dtype=ttnn.bfloat16)
-
-#             parameters["proj"]["bias"] = preprocess_linear_bias(torch_model.proj.bias, dtype=ttnn.bfloat16)
-
-#         return parameters
-
-#     return custom_preprocessor
-
-
 @pytest.mark.parametrize(
     "input_shape, dim, num_heads",
-    (
-        ((3, 17, 3072), 3072, 1),  # Original test case
-        # ((3, 65, 3072), 3072, 1),  # Original test case
-        # ((3, 257, 3072), 3072, 1),  # Original test case
-    ),
+    (((3, 17, 3072), 3072, 1),),  # Original test case
 )
 def test_mask_token_inference(device, input_shape, dim, num_heads):
     # Create test input [B, N, C] where first token is cls token

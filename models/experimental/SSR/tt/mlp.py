@@ -4,7 +4,7 @@ from models.demos.deepseek_v3.utils.config_helpers import matmul_config
 
 
 class TTMlp(LightweightModule):
-    def __init__(self, device, memory_config, in_features, hidden_features=None, out_features=None, parameters=None):
+    def __init__(self, device, in_features, hidden_features=None, out_features=None, parameters=None):
         self.device = device
 
         self.in_features = in_features

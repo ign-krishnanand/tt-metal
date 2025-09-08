@@ -158,10 +158,12 @@ class TTPatchMerging(LightweightModule):
         )
         ttnn.deallocate(merged)
 
-        conf = matmul_config(normalized.shape[-2], normalized.shape[-1], self.reduction_weight.shape[-2], (8, 8))
         # Apply linear reduction [B, H/2*W/2, 2*C]
+        output_matmul_config = matmul_config(
+            normalized.shape[-2], normalized.shape[-1], self.reduction_weight.shape[-2], (8, 8)
+        )
         output = ttnn.linear(
-            normalized, self.reduction_weight, memory_config=ttnn.L1_MEMORY_CONFIG, program_config=conf
+            normalized, self.reduction_weight, memory_config=ttnn.L1_MEMORY_CONFIG, program_config=output_matmul_config
         )
         ttnn.deallocate(normalized)
 
