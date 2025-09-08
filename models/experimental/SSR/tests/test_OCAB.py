@@ -94,8 +94,7 @@ def create_ocab_preprocessor(device):
 
 @pytest.mark.parametrize(
     "dim, input_resolution, window_size, overlap_ratio, num_heads, input_shape",
-    # ((180, (64, 64), 16, 0.5, 6, (1, 4096, 180)),),
-    ((192, (64, 64), 16, 0.5, 6, (1, 4096, 192)),),
+    ((180, (64, 64), 16, 0.5, 6, (1, 4096, 180)),),
 )
 def test_ocab(dim, input_resolution, window_size, overlap_ratio, num_heads, input_shape):
     x = torch.randn(input_shape)
@@ -119,7 +118,6 @@ def test_ocab(dim, input_resolution, window_size, overlap_ratio, num_heads, inpu
     overlap_win_size = int(window_size * overlap_ratio) + window_size
     rpi = torch.zeros((window_size * window_size, overlap_win_size * overlap_win_size), dtype=torch.long)
 
-    print("RPI shape:", rpi.shape)
     ref_output = ref_layer(x, x_size, rpi)
 
     device = ttnn.open_device(device_id=0, l1_small_size=32768)
